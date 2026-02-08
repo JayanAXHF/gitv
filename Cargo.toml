@@ -5,13 +5,18 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1.89"
+clap = { version = "4.5.57", features = ["derive"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = "0.3.31"
-keyring = "3.6.3"
+inquire = "0.9.3"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native"] }
 octocrab = "0.49.5"
 rat-widget = "3.1.1"
 ratatui = "0.30.0"
 ratatui-macros = "0.7.0"
+termprofile = { version = "0.2.0", features = ["convert", "ratatui"] }
+textwrap = { version = "0.16.2", features = ["terminal_size"] }
 thiserror = "2.0.18"
 tokio = { version = "1.38", features = ["macros", "rt-multi-thread"] }
 tokio-util = "0.7.18"

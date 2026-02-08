@@ -10,7 +10,7 @@ impl GithubClient {
         if let Some(token) = token {
             builder = builder.personal_token(token);
         }
-        let inner = builder.build().map_err(Box::new)?;
+        let inner = builder.build()?;
         Ok(Self { inner })
     }
 

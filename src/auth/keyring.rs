@@ -19,4 +19,10 @@ impl AuthProvider for KeyringAuth {
         let token = entry.get_password()?;
         Ok(token)
     }
+    fn set_token(&self, token: &str) -> Result<(), AppError> {
+        let entry = keyring::Entry::new(&self.service, "github")?;
+        entry.set_password(token)?;
+
+        Ok(())
+    }
 }

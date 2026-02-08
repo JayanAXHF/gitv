@@ -31,15 +31,11 @@ impl Layout {
             issue_preview,
         }
     }
-    pub fn areas(&self) -> [Rect; 8] {
+    pub fn areas(&self) -> [Rect; 4] {
         [
-            self.status_dropdown,
             self.title_bar,
-            self.status_bar,
             self.main_content,
             self.label_list,
-            self.text_search,
-            self.label_search,
             self.issue_preview,
         ]
     }
