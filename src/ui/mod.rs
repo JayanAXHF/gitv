@@ -95,7 +95,7 @@ impl App {
     ) -> Result<Self, AppError> {
         let text_search = TextSearch::new(state.clone());
         let status_bar = StatusBar::new(state.clone());
-        let label_list = LabelList::default();
+        let label_list = LabelList::new(state.clone());
         let issue_handler = GITHUB_CLIENT
             .get()
             .unwrap()
@@ -234,7 +234,10 @@ pub enum Action {
     Quit,
     AppEvent(crossterm::event::Event),
     NewPage(Box<Page<Issue>>),
-    ChangeLabels(Vec<Label>),
+    SelectedIssue { number: u64, labels: Vec<Label> },
+    IssueLabelsUpdated { number: u64, labels: Vec<Label> },
+    LabelMissing { name: String },
+    LabelEditError { message: String },
     FinishedLoading,
 }
 

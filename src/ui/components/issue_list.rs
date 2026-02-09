@@ -81,7 +81,7 @@ impl<'a> IssueList<'a> {
         )
         .block(block)
         .style(Style::default())
-        .select_style(Style::default().add_modifier(Modifier::BOLD));
+        .focus_style(Style::default().reversed().add_modifier(Modifier::BOLD));
         list.render(area.main_content, buf, &mut self.list_state);
         if self.state == State::Loading {
             let title_area = Rect {
@@ -192,14 +192,19 @@ impl Component for IssueList<'_> {
                                 {
                                     tx.send(crate::ui::Action::NewPage(Box::new(p))).await?;
                                 }
+                                tx.send(crate::ui::Action::FinishedLoading).await.unwrap();
                                 Ok::<(), AppError>(())
                             });
                         }
-                        let labels = &self.issues[selected].0.labels;
+                        let issue = &self.issues[selected].0;
+                        let labels = &issue.labels;
                         self.action_tx
                             .as_ref()
                             .unwrap()
-                            .send(crate::ui::Action::ChangeLabels(labels.clone()))
+                            .send(crate::ui::Action::SelectedIssue {
+                                number: issue.number,
+                                labels: labels.clone(),
+                            })
                             .await
                             .unwrap();
                     }
@@ -214,6 +219,14 @@ impl Component for IssueList<'_> {
                 self.issues = prev_issues.into_iter().chain(issues).collect();
                 self.page = Some(*p);
                 self.state = State::Loaded;
+            }
+            crate::ui::Action::FinishedLoading => {
+                self.state = State::Loaded;
+            }
+            crate::ui::Action::IssueLabelsUpdated { number, labels } => {
+                if let Some(issue) = self.issues.iter_mut().find(|i| i.0.number == number) {
+                    issue.0.labels = labels;
+                }
             }
             _ => {}
         }
