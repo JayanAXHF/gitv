@@ -23,6 +23,7 @@ use ratatui::{
 use ratatui_macros::line;
 use textwrap::core::display_width;
 use throbber_widgets_tui::{BRAILLE_SIX_DOUBLE, Throbber, ThrobberState, WhichUse};
+use tracing::info;
 
 use crate::{
     app::GITHUB_CLIENT,
@@ -136,6 +137,7 @@ impl IssueConversation {
         let input_area = areas[1];
 
         let items = self.build_items(content_area);
+        info!("Rendering {} comments", items.len());
         let mut list_block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(get_border_style(&self.list_state));
@@ -243,6 +245,11 @@ impl IssueConversation {
         }
 
         if self.cache_number == Some(seed.number) {
+            info!(
+                "Rendering {} comments for #{}",
+                self.cache_comments.len(),
+                seed.number
+            );
             for comment in &self.cache_comments {
                 let body_lines = self
                     .markdown_cache
@@ -298,10 +305,11 @@ impl IssueConversation {
 
             match page {
                 Ok(mut p) => {
-                    let comments = std::mem::take(&mut p.items)
+                    let comments: Vec<CommentView> = std::mem::take(&mut p.items)
                         .into_iter()
                         .map(CommentView::from_api)
                         .collect();
+                    info!("Loaded {} comments for issue {}", comments.len(), number);
                     let _ = action_tx
                         .send(Action::IssueCommentsLoaded { number, comments })
                         .await;
@@ -437,10 +445,17 @@ impl Component for IssueConversation {
                 self.loading.remove(&number);
                 if self.current.as_ref().is_some_and(|s| s.number == number) {
                     self.cache_number = Some(number);
+                    info!("Setting {} comments for #{}", comments.len(), number);
                     self.cache_comments = comments;
                     self.markdown_cache.clear();
                     self.body_cache = None;
                     self.error = None;
+                    self.action_tx
+                        .as_ref()
+                        .unwrap()
+                        .send(Action::ForceRender)
+                        .await
+                        .unwrap();
                 }
             }
             Action::IssueCommentPosted { number, comment } => {

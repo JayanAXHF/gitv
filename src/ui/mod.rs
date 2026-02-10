@@ -189,7 +189,7 @@ impl App {
                     let r = focus.next_force();
                     info!(outcome = ?r, "Focus");
                 }
-                Some(Action::AppEvent(event)) => {
+                Some(Action::AppEvent(ref event)) => {
                     self.handle_event(event).await?;
                 }
                 Some(Action::Quit) | None => {
@@ -198,7 +198,7 @@ impl App {
                 }
                 _ => {}
             }
-            if should_draw {
+            if should_draw || matches!(action, Some(Action::ForceRender)) {
                 self.draw(terminal)?;
             }
             if self.cancel_action.is_cancelled() {
@@ -209,13 +209,13 @@ impl App {
         Ok(())
     }
     #[instrument(skip(self))]
-    async fn handle_event(&mut self, event: crossterm::event::Event) -> Result<(), AppError> {
+    async fn handle_event(&mut self, event: &crossterm::event::Event) -> Result<(), AppError> {
         let capture_focus = self
             .components
             .iter()
             .any(|c| c.should_render() && c.capture_focus_event(&event));
         let focus = focus(self);
-        let outcome = focus.handle(&event, Regular);
+        let outcome = focus.handle(event, Regular);
         info!(outcome = ?outcome, "Focus");
         if let Outcome::Continue = outcome
             && let crossterm::event::Event::Key(key) = event
@@ -225,7 +225,7 @@ impl App {
         }
         Ok(())
     }
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Result<(), AppError> {
+    async fn handle_key(&mut self, key: &crossterm::event::KeyEvent) -> Result<(), AppError> {
         match key.code {
             crossterm::event::KeyCode::Char('q') => {
                 self.cancel_action.cancel();
@@ -258,10 +258,6 @@ impl App {
             let buf = f.buffer_mut();
 
             let areas = layout.areas();
-            for area in areas {
-                let w = Block::bordered().border_type(ratatui::widgets::BorderType::Rounded);
-                w.render(area, buf);
-            }
             for component in self.components.iter_mut() {
                 if component.should_render() {
                     component.render(layout, buf);
@@ -283,6 +279,7 @@ pub enum Action {
     Quit,
     AppEvent(crossterm::event::Event),
     NewPage(Arc<Page<Issue>>),
+    ForceRender,
     SelectedIssue {
         number: u64,
         labels: Vec<Label>,
