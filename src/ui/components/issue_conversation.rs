@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use crossterm::event;
 use octocrab::models::issues::Comment as ApiComment;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, Event, Options, Parser, Tag, TagEnd};
 use rat_cursor::HasScreenCursor;
 use rat_widget::{
     event::{HandleEvent, TextOutcome, ct_event},
@@ -12,7 +12,7 @@ use rat_widget::{
 };
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout as TuiLayout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, ListItem, StatefulWidget},
@@ -786,7 +786,7 @@ fn truncate_preview(input: &str, max_width: usize) -> String {
 
 fn render_markdown_lines(text: &str, width: usize, indent: usize) -> Vec<Line<'static>> {
     let mut renderer = MarkdownRenderer::new(width, indent);
-    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_GFM);
     for event in parser {
         match event {
             Event::Start(tag) => renderer.start_tag(tag),
@@ -811,9 +811,56 @@ struct MarkdownRenderer {
     style_stack: Vec<Style>,
     current_style: Style,
     in_block_quote: bool,
+    block_quote_style: Option<AdmonitionStyle>,
+    block_quote_title_pending: bool,
     in_code_block: bool,
     list_prefix: Option<String>,
     pending_space: bool,
+}
+
+#[derive(Clone, Copy)]
+struct AdmonitionStyle {
+    marker: &'static str,
+    default_title: &'static str,
+    border_color: Color,
+    title_style: Style,
+}
+
+impl AdmonitionStyle {
+    fn from_block_quote_kind(kind: BlockQuoteKind) -> Option<Self> {
+        match kind {
+            BlockQuoteKind::Note => Some(Self {
+                marker: "NOTE",
+                default_title: "Note",
+                border_color: Color::Blue,
+                title_style: Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            }),
+            BlockQuoteKind::Tip => Some(Self {
+                marker: "TIP",
+                default_title: "Tip",
+                border_color: Color::Green,
+                title_style: Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+            }),
+            BlockQuoteKind::Important => Some(Self {
+                marker: "IMPORTANT",
+                default_title: "Important",
+                border_color: Color::Cyan,
+                title_style: Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            }),
+            BlockQuoteKind::Warning => Some(Self {
+                marker: "WARNING",
+                default_title: "Warning",
+                border_color: Color::Yellow,
+                title_style: Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            }),
+            BlockQuoteKind::Caution => Some(Self {
+                marker: "CAUTION",
+                default_title: "Caution",
+                border_color: Color::Red,
+                title_style: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            }),
+        }
+    }
 }
 
 impl MarkdownRenderer {
@@ -827,6 +874,8 @@ impl MarkdownRenderer {
             style_stack: Vec::new(),
             current_style: Style::new(),
             in_block_quote: false,
+            block_quote_style: None,
+            block_quote_title_pending: false,
             in_code_block: false,
             list_prefix: None,
             pending_space: false,
@@ -845,9 +894,11 @@ impl MarkdownRenderer {
             Tag::Heading { .. } => {
                 self.push_style(Style::new().add_modifier(Modifier::BOLD));
             }
-            Tag::BlockQuote(_) => {
+            Tag::BlockQuote(kind) => {
                 self.flush_line();
                 self.in_block_quote = true;
+                self.block_quote_style = kind.and_then(AdmonitionStyle::from_block_quote_kind);
+                self.block_quote_title_pending = self.block_quote_style.is_some();
             }
             Tag::CodeBlock(..) => {
                 self.flush_line();
@@ -869,6 +920,8 @@ impl MarkdownRenderer {
             TagEnd::BlockQuote => {
                 self.flush_line();
                 self.in_block_quote = false;
+                self.block_quote_style = None;
+                self.block_quote_title_pending = false;
                 self.push_blank_line();
             }
             TagEnd::CodeBlock => {
@@ -889,6 +942,21 @@ impl MarkdownRenderer {
     }
 
     fn text(&mut self, text: &str) {
+        if self.in_block_quote && self.block_quote_title_pending {
+            if let Some(style) = self.block_quote_style
+                && let Some(title) = extract_admonition_title(text, style.marker)
+            {
+                let title = if title.is_empty() {
+                    style.default_title
+                } else {
+                    title
+                };
+                self.push_admonition_header(title, style);
+                self.block_quote_title_pending = false;
+                return;
+            }
+            self.ensure_admonition_header();
+        }
         if self.in_code_block {
             self.code_block_text(text);
         } else {
@@ -898,6 +966,7 @@ impl MarkdownRenderer {
     }
 
     fn inline_code(&mut self, text: &str) {
+        self.ensure_admonition_header();
         let style = self
             .current_style
             .patch(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
@@ -905,6 +974,7 @@ impl MarkdownRenderer {
     }
 
     fn soft_break(&mut self) {
+        self.ensure_admonition_header();
         if self.in_code_block {
             self.hard_break();
         } else {
@@ -913,6 +983,7 @@ impl MarkdownRenderer {
     }
 
     fn hard_break(&mut self) {
+        self.ensure_admonition_header();
         self.flush_line();
     }
 
@@ -997,7 +1068,7 @@ impl MarkdownRenderer {
     }
 
     fn code_block_text(&mut self, text: &str) {
-        let style = Style::new().fg(Color::LightYellow);
+        let style = Style::new().light_yellow();
         for line in text.split('\n') {
             self.flush_line();
             self.start_line();
@@ -1019,8 +1090,11 @@ impl MarkdownRenderer {
         }
         if self.in_block_quote {
             self.current_width += 2;
-            self.current_line
-                .push(Span::styled("│ ", Style::new().fg(Color::DarkGray)));
+            let border_style = self
+                .block_quote_style
+                .map(|s| Style::new().fg(s.border_color))
+                .unwrap_or_else(|| Style::new().fg(Color::DarkGray));
+            self.current_line.push(Span::styled("│ ", border_style));
         }
         if let Some(prefix) = &self.list_prefix {
             self.current_width += display_width(prefix);
@@ -1078,4 +1152,43 @@ impl MarkdownRenderer {
         }
         self.lines
     }
+
+    fn ensure_admonition_header(&mut self) {
+        if !self.block_quote_title_pending {
+            return;
+        }
+        if let Some(style) = self.block_quote_style {
+            self.push_admonition_header(style.default_title, style);
+        }
+        self.block_quote_title_pending = false;
+    }
+
+    fn push_admonition_header(&mut self, title: &str, style: AdmonitionStyle) {
+        self.flush_line();
+        self.start_line();
+        self.current_line
+            .push(Span::styled(title.to_string(), style.title_style));
+        self.current_width += display_width(title);
+        self.flush_line();
+    }
+}
+
+fn extract_admonition_title<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+    let trimmed = text.trim_start();
+    let min_len = marker.len() + 3;
+    if trimmed.len() < min_len {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    if bytes[0] != b'[' || bytes[1] != b'!' {
+        return None;
+    }
+    let marker_end = 2 + marker.len();
+    if bytes.get(marker_end) != Some(&b']') {
+        return None;
+    }
+    if !trimmed[2..marker_end].eq_ignore_ascii_case(marker) {
+        return None;
+    }
+    Some(trimmed[marker_end + 1..].trim())
 }
