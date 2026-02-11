@@ -39,7 +39,6 @@ use ratatui::{
 };
 use ratatui_macros::line;
 use std::{
-    any::{Any, TypeId},
     collections::HashMap,
     io::stdout,
     sync::{Arc, OnceLock},
