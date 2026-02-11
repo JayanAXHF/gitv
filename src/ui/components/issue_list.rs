@@ -46,6 +46,7 @@ pub struct IssueList<'a> {
     pub handler: IssueHandler<'a>,
     pub action_tx: Option<tokio::sync::mpsc::Sender<crate::ui::Action>>,
     pub throbber_state: ThrobberState,
+    index: usize,
     state: State,
     pub screen: MainScreen,
 }
@@ -101,15 +102,19 @@ impl<'a> IssueList<'a> {
             issues: vec![],
             list_state: rat_widget::list::ListState::default(),
             handler,
+            index: 0,
             screen: MainScreen::default(),
             state: State::default(),
         }
     }
     pub fn render(&mut self, area: Layout, buf: &mut Buffer) {
-        let block = Block::bordered()
+        let mut block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(get_border_style(&self.list_state))
             .padding(Padding::horizontal(3));
+        if self.state != State::Loading {
+            block = block.title(format!("[{}] Issues", self.index));
+        }
         let list = rat_widget::list::List::<RowSelection>::new(
             self.issues.iter().map(Into::<ListItem>::into),
         )
@@ -316,6 +321,9 @@ impl Component for IssueList<'_> {
 
     fn is_animating(&self) -> bool {
         self.screen == MainScreen::List && self.state == State::Loading
+    }
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
     }
 }
 

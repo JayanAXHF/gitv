@@ -1,17 +1,18 @@
 use async_trait::async_trait;
-use std::sync::Arc;
 use rat_cursor::HasScreenCursor;
 use rat_widget::{
     choice::{Choice, ChoiceState},
     event::{HandleEvent, Popup, Regular, ct_event},
-    focus::{HasFocus, impl_has_focus},
+    focus::{FocusBuilder, FocusFlag, HasFocus},
     popup::Placement,
 };
 use ratatui::{
     buffer::Buffer,
+    layout::Rect,
     style::Style,
     widgets::{Block, BorderType, StatefulWidget, Widget},
 };
+use std::sync::Arc;
 use throbber_widgets_tui::ThrobberState;
 use tracing::info;
 use tracing::instrument;
@@ -37,6 +38,9 @@ pub struct TextSearch {
     loader_state: ThrobberState,
     repo: String,
     owner: String,
+    focus: FocusFlag,
+    area: Rect,
+    index: usize,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -57,16 +61,23 @@ impl TextSearch {
             state: Default::default(),
             cstate: Default::default(),
             action_tx: None,
+            focus: FocusFlag::new().with_name("search_bar"),
+            area: Rect::default(),
+            index: 0,
         }
     }
 
     fn render_w(&mut self, layout: Layout, buf: &mut Buffer) {
+        let total_area = layout
+            .text_search
+            .union(layout.label_search.union(layout.status_dropdown));
+        self.area = total_area;
         let contents = (1..).zip(OPTIONS).collect::<Vec<_>>();
         let text_input = rat_widget::text_input::TextInput::new().block(
             Block::bordered()
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .border_style(get_border_style(&self.search_state))
-                .title("Search"),
+                .title(format!("[{}] Search", self.index)),
         );
         let label = rat_widget::text_input::TextInput::new().block(
             Block::bordered()
@@ -153,7 +164,21 @@ impl TextSearch {
     }
 }
 
-impl_has_focus!(search_state, label_state, cstate for TextSearch);
+impl HasFocus for TextSearch {
+    fn build(&self, builder: &mut FocusBuilder) {
+        let tag = builder.start(self);
+        builder.widget(&self.search_state);
+        builder.widget(&self.label_state);
+        builder.widget(&self.cstate);
+        builder.end(tag);
+    }
+    fn focus(&self) -> FocusFlag {
+        self.focus.clone()
+    }
+    fn area(&self) -> ratatui::layout::Rect {
+        self.area
+    }
+}
 
 #[async_trait(?Send)]
 impl Component for TextSearch {
@@ -202,5 +227,8 @@ impl Component for TextSearch {
 
     fn is_animating(&self) -> bool {
         self.state == State::Loading
+    }
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
     }
 }

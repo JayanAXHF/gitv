@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use async_trait::async_trait;
 use rat_widget::focus::HasFocus;
 use ratatui::buffer::Buffer;
@@ -38,4 +40,6 @@ pub trait Component: HasFocus {
     fn capture_focus_event(&self, _event: &Event) -> bool {
         false
     }
+    #[allow(unused_variables)]
+    fn set_index(&mut self, index: usize) {}
 }

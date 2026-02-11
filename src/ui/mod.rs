@@ -1,10 +1,13 @@
-use std::{
-    io::stdout,
-    sync::{Arc, OnceLock},
-};
+pub mod components;
+pub mod filter;
+pub mod layout;
+pub mod macros;
+pub mod theme;
+pub mod utils;
 
 use crate::{
     app::GITHUB_CLIENT,
+    define_cid_map,
     errors::AppError,
     ui::components::{
         Component, DumbComponent,
@@ -29,7 +32,18 @@ use rat_widget::{
     event::{HandleEvent, Outcome, Regular},
     focus::{Focus, FocusBuilder},
 };
-use ratatui::{crossterm, prelude::*};
+use ratatui::{
+    crossterm,
+    prelude::*,
+    widgets::{Block, Paragraph},
+};
+use ratatui_macros::line;
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    io::stdout,
+    sync::{Arc, OnceLock},
+};
 use termprofile::{DetectorSettings, TermProfile};
 use tokio::{select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -42,6 +56,7 @@ use crate::ui::components::{
 
 const TICK_RATE: std::time::Duration = std::time::Duration::from_millis(100);
 pub static COLOR_PROFILE: OnceLock<TermProfile> = OnceLock::new();
+pub static CIDMAP: OnceLock<HashMap<u8, usize>> = OnceLock::new();
 
 pub async fn run(
     AppState {
@@ -111,30 +126,32 @@ impl App {
         action_rx: tokio::sync::mpsc::Receiver<Action>,
         state: AppState,
     ) -> Result<Self, AppError> {
-        let text_search = TextSearch::new(state.clone());
+        let mut text_search = TextSearch::new(state.clone());
         let status_bar = StatusBar::new(state.clone());
-        let label_list = LabelList::new(state.clone());
-        let issue_preview = IssuePreview::new(state.clone());
-        let issue_conversation = IssueConversation::new(state.clone());
+        let mut label_list = LabelList::new(state.clone());
+        let mut issue_preview = IssuePreview::new(state.clone());
+        let mut issue_conversation = IssueConversation::new(state.clone());
         let issue_handler = GITHUB_CLIENT
             .get()
             .unwrap()
             .inner()
             .issues(state.owner.clone(), state.repo.clone());
-        let issue_list =
+        let mut issue_list =
             IssueList::new(issue_handler, state.owner, state.repo, action_tx.clone()).await;
+
+        let comps = define_cid_map!(
+             1 -> text_search,
+             2 -> issue_list,
+             3 -> issue_conversation,
+             4 -> label_list,
+             5 -> issue_preview
+        )?;
         Ok(Self {
             focus: None,
             action_tx,
             action_rx,
             cancel_action: Default::default(),
-            components: vec![
-                Box::new(issue_list),
-                Box::new(issue_conversation),
-                Box::new(label_list),
-                Box::new(issue_preview),
-                Box::new(text_search), // This should be the last component so that the popup area is rendered properly
-            ],
+            components: comps,
             dumb_components: vec![Box::new(status_bar)],
         })
     }
@@ -240,6 +257,23 @@ impl App {
             self.cancel_action.cancel();
         }
 
+        match key.code {
+            crossterm::event::KeyCode::Char(char) if ('1'..'5').contains(&char) => {
+                //SAFETY: char is in range
+                let index: u8 = char.to_digit(10).unwrap().try_into().unwrap();
+                //SAFETY: cid is always in map, and map is static
+                info!("Focusing {}", index);
+                let cid = CIDMAP.get().unwrap().get(&index).unwrap();
+                //SAFETY: cid is in map, and map is static
+                let component = unsafe { self.components.get_unchecked(*cid) };
+
+                if let Some(f) = self.focus.as_mut() {
+                    f.focus(component.as_ref());
+                }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -263,6 +297,9 @@ impl App {
                 }
             }
             let buf = f.buffer_mut();
+            let title = Paragraph::new(line!["IssueMe"].style(Style::new().bold()))
+                .block(Block::bordered().border_type(ratatui::widgets::BorderType::Rounded));
+            title.render(layout.title_bar, buf);
 
             for component in self.components.iter_mut() {
                 if component.should_render() {
@@ -334,9 +371,3 @@ pub enum Action {
     FinishedLoading,
     ForceFocusChange,
 }
-
-pub mod components;
-pub mod filter;
-pub mod layout;
-pub mod theme;
-pub mod utils;

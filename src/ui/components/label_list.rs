@@ -45,6 +45,7 @@ pub struct LabelList {
     pending_status: Option<String>,
     owner: String,
     repo: String,
+    index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +106,7 @@ impl LabelList {
             pending_status: None,
             owner,
             repo,
+            index: 0,
         }
     }
 
@@ -123,9 +125,12 @@ impl LabelList {
         }
 
         let title = if let Some(status) = &self.status_message {
-            format!("Labels (a:add d:remove) | {}", status.message)
+            format!(
+                "[{}] Labels (a:add d:remove) | {}",
+                self.index, status.message
+            )
         } else {
-            "Labels (a:add d:remove)".to_string()
+            format!("[{}] Labels (a:add d:remove)", self.index)
         };
         let block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -608,6 +613,9 @@ impl Component for LabelList {
 
     fn is_animating(&self) -> bool {
         self.status_message.is_some()
+    }
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
     }
 }
 impl HasFocus for LabelList {

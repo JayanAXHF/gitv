@@ -100,6 +100,7 @@ pub struct IssueConversation {
     area: Rect,
     textbox_state: InputState,
     paragraph_state: ParagraphState,
+    index: usize,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -145,6 +146,7 @@ impl IssueConversation {
             screen: MainScreen::default(),
             focus: FocusFlag::new().with_name("issue_conversation"),
             area: Rect::default(),
+            index: 0,
         }
     }
 
@@ -164,7 +166,7 @@ impl IssueConversation {
             .border_style(get_border_style(&self.list_state));
 
         if !self.is_loading_current() {
-            list_block = list_block.title("Conversation");
+            list_block = list_block.title(format!("[{}] Conversation", self.index));
         }
 
         let list = rat_widget::list::List::<RowSelection>::new(items)
@@ -597,6 +599,9 @@ impl Component for IssueConversation {
             ),
             _ => false,
         }
+    }
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
     }
 }
 
