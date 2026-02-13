@@ -17,6 +17,7 @@ pub static GITHUB_CLIENT: OnceLock<GithubClient> = OnceLock::new();
 impl App {
     pub async fn new() -> Result<Self, AppError> {
         let cli = cli::Cli::parse();
+        logging::init()?;
         let mut auth = crate::auth::keyring::KeyringAuth::new("issue_me")?;
         let token = match auth.get_token().ok() {
             Some(token) => token,
@@ -32,7 +33,6 @@ impl App {
 
     pub async fn run(&mut self) -> Result<(), AppError> {
         use crate::ui::AppState;
-        logging::init()?;
         let current_user = GITHUB_CLIENT
             .get()
             .unwrap()
