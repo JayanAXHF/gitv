@@ -154,7 +154,7 @@ impl TextSearch {
                 .unwrap()
                 .search()
                 .issues_and_pull_requests(&search)
-                .page(1)
+                .page(1_u32)
                 .per_page(10)
                 .sort("created")
                 .order("desc")
