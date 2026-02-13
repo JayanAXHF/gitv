@@ -21,7 +21,7 @@ use crate::{
     app::GITHUB_CLIENT,
     ui::{
         Action, AppState, MergeStrategy,
-        components::Component,
+        components::{Component, issue_list::MainScreen},
         layout::Layout,
         utils::{get_border_style, get_loader_area},
     },
@@ -45,6 +45,7 @@ pub struct TextSearch {
     loader_state: ThrobberState,
     repo: String,
     owner: String,
+    screen: MainScreen,
     focus: FocusFlag,
     area: Rect,
     index: usize,
@@ -68,6 +69,7 @@ impl TextSearch {
             state: Default::default(),
             cstate: Default::default(),
             action_tx: None,
+            screen: MainScreen::default(),
             focus: FocusFlag::new().with_name("search_bar"),
             area: Rect::default(),
             index: 0,
@@ -202,7 +204,13 @@ impl Component for TextSearch {
     }
     async fn handle_event(&mut self, event: Action) {
         match event {
+            Action::ChangeIssueScreen(screen) => {
+                self.screen = screen;
+            }
             Action::AppEvent(ref event) => {
+                if self.screen == MainScreen::CreateIssue {
+                    return;
+                }
                 if self.self_is_focused() {
                     match event {
                         ct_event!(keycode press Enter) => {
@@ -237,7 +245,11 @@ impl Component for TextSearch {
     }
 
     fn is_animating(&self) -> bool {
-        self.state == State::Loading
+        self.screen != MainScreen::CreateIssue && self.state == State::Loading
+    }
+
+    fn should_render(&self) -> bool {
+        self.screen != MainScreen::CreateIssue
     }
     fn set_index(&mut self, index: usize) {
         self.index = index;
