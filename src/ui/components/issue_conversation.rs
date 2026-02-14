@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use crossterm::event;
 use futures::{StreamExt, stream};
 use octocrab::models::{issues::Comment as ApiComment, reactions::ReactionContent};
-use pulldown_cmark::{BlockQuoteKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, Event, Options, Parser, Tag, TagEnd, TextMergeStream};
 use rat_cursor::HasScreenCursor;
 use rat_widget::{
     event::{HandleEvent, TextOutcome, ct_event},
@@ -1332,16 +1332,28 @@ fn truncate_preview(input: &str, max_width: usize) -> String {
 
 pub(crate) fn render_markdown_lines(text: &str, width: usize, indent: usize) -> Vec<Line<'static>> {
     let mut renderer = MarkdownRenderer::new(width, indent);
-    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_GFM);
+    let options = Options::ENABLE_GFM
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_TABLES
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_SUPERSCRIPT
+        | Options::ENABLE_SUBSCRIPT
+        | Options::ENABLE_MATH;
+    let parser = Parser::new_ext(text, options);
+    let parser = TextMergeStream::new(parser);
     for event in parser {
         match event {
             Event::Start(tag) => renderer.start_tag(tag),
             Event::End(tag) => renderer.end_tag(tag),
             Event::Text(text) => renderer.text(&text),
             Event::Code(text) => renderer.inline_code(&text),
+            Event::InlineMath(text) | Event::DisplayMath(text) => renderer.inline_math(&text),
             Event::SoftBreak => renderer.soft_break(),
             Event::HardBreak => renderer.hard_break(),
-            Event::Html(text) => renderer.text(&text),
+            Event::Html(text) | Event::InlineHtml(text) => renderer.text(&text),
+            Event::Rule => renderer.rule(),
+            Event::TaskListMarker(checked) => renderer.task_list_marker(checked),
             _ => {}
         }
     }
@@ -1432,6 +1444,10 @@ impl MarkdownRenderer {
         match tag {
             Tag::Emphasis => self.push_style(Style::new().add_modifier(Modifier::ITALIC)),
             Tag::Strong => self.push_style(Style::new().add_modifier(Modifier::BOLD)),
+            Tag::Strikethrough => self.push_style(Style::new().add_modifier(Modifier::CROSSED_OUT)),
+            Tag::Superscript | Tag::Subscript => {
+                self.push_style(Style::new().add_modifier(Modifier::ITALIC))
+            }
             Tag::Link { .. } => self.push_style(
                 Style::new()
                     .fg(Color::Blue)
@@ -1460,10 +1476,16 @@ impl MarkdownRenderer {
 
     fn end_tag(&mut self, tag: TagEnd) {
         match tag {
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link | TagEnd::Heading(_) => {
+            TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript
+            | TagEnd::Link
+            | TagEnd::Heading(_) => {
                 self.pop_style();
             }
-            TagEnd::BlockQuote => {
+            TagEnd::BlockQuote(_) => {
                 self.flush_line();
                 self.in_block_quote = false;
                 self.block_quote_style = None;
@@ -1519,6 +1541,14 @@ impl MarkdownRenderer {
         self.push_text(text, style);
     }
 
+    fn inline_math(&mut self, text: &str) {
+        self.ensure_admonition_header();
+        let style = self
+            .current_style
+            .patch(Style::new().fg(Color::LightMagenta).add_modifier(Modifier::ITALIC));
+        self.push_text(text, style);
+    }
+
     fn soft_break(&mut self) {
         self.ensure_admonition_header();
         if self.in_code_block {
@@ -1531,6 +1561,24 @@ impl MarkdownRenderer {
     fn hard_break(&mut self) {
         self.ensure_admonition_header();
         self.flush_line();
+    }
+
+    fn task_list_marker(&mut self, checked: bool) {
+        self.ensure_admonition_header();
+        let marker = if checked { "[x] " } else { "[ ] " };
+        self.push_text(marker, self.current_style);
+    }
+
+    fn rule(&mut self) {
+        self.flush_line();
+        self.start_line();
+        let width = self.max_width.saturating_sub(self.prefix_width()).max(8);
+        let bar = "─".repeat(width);
+        self.current_line
+            .push(Span::styled(bar.clone(), Style::new().fg(Color::DarkGray)));
+        self.current_width += display_width(&bar);
+        self.flush_line();
+        self.push_blank_line();
     }
 
     fn push_text(&mut self, text: &str, style: Style) {
