@@ -6,20 +6,34 @@ use tracing_subscriber::filter::{self, Directive};
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
+    /// Top-level CLI arguments controlling repository selection and runtime behavior.
     #[clap(flatten)]
     pub args: Args,
 }
 
 #[derive(clap::Args, Clone)]
 pub struct Args {
+    /// GitHub repository owner or organization (for example: `rust-lang`).
+    ///
+    /// This is required unless `--print-log-dir` or `--set-token` is provided.
     #[clap(required_unless_present_any = [ "print_log_dir", "set_token" ])]
     pub owner: Option<String>,
+    /// GitHub repository name under `owner` (for example: `rust`).
+    ///
+    /// This is required unless `--print-log-dir` or `--set-token` is provided.
     #[clap(required_unless_present_any = [ "print_log_dir", "set_token" ])]
     pub repo: Option<String>,
+    /// Global logging verbosity used by the application logger.
+    ///
+    /// Defaults to `info`.
     #[clap(long, short, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
+    /// Prints the directory where log files are written and exits.
     #[clap(long, short)]
     pub print_log_dir: bool,
+    /// Stores/updates the GitHub token in the configured credential store.
+    ///
+    /// When provided, this command updates the saved token value.
     #[clap(long, short)]
     pub set_token: Option<String>,
 }
