@@ -15,8 +15,15 @@ pub mod label_list;
 pub mod search_bar;
 pub mod status_bar;
 
+#[async_trait(?Send)]
 pub trait DumbComponent {
     fn render(&mut self, area: Layout, buf: &mut Buffer);
+    fn register_action_tx(&mut self, action_tx: tokio::sync::mpsc::Sender<Action>) {
+        let _ = action_tx;
+    }
+    async fn handle_event(&mut self, event: Action) {
+        let _ = event;
+    }
 }
 
 #[async_trait(?Send)]

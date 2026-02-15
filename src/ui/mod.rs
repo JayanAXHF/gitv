@@ -153,7 +153,7 @@ impl App {
         let mut text_search = TextSearch::new(state.clone());
         let status_bar = StatusBar::new(state.clone());
         let mut label_list = LabelList::new(state.clone());
-        let mut issue_preview = IssuePreview::new(state.clone());
+        let issue_preview = IssuePreview::new(state.clone());
         let mut issue_conversation = IssueConversation::new(state.clone());
         let mut issue_create = IssueCreate::new(state.clone());
         let issue_handler = GITHUB_CLIENT
@@ -172,9 +172,8 @@ impl App {
         let comps = define_cid_map!(
              2 -> issue_list,
              3 -> issue_conversation,
-             6 -> issue_create,
+             5 -> issue_create,
              4 -> label_list,
-             5 -> issue_preview,
              1 -> text_search, // this needs to be the last one
         )?;
         Ok(Self {
@@ -186,7 +185,7 @@ impl App {
             last_focused: None,
             cancel_action: Default::default(),
             components: comps,
-            dumb_components: vec![Box::new(status_bar)],
+            dumb_components: vec![Box::new(status_bar), Box::new(issue_preview)],
         })
     }
     pub async fn run(
