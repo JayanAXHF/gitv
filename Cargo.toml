@@ -3,6 +3,15 @@ name = "gitv"
 version = "0.1.0"
 edition = "2024"
 build = "build.rs"
+description = "A terminal-based GitHub client built with Rust and Ratatui."
+authors = ["JayanAXHF <sunil.chdry@gmail.com>"]
+license = "Unlicense OR MIT"
+build = "build.rs"
+homepage = "https://github.com/jayanaxhf/gitv"
+repository = "https://github.com/jayanaxhf/gitv"
+readme = "README.md"
+keywords = ["tui", "cli", "github", "prodcutivity", "ratatui"]
+categories = ["command-line-utilities", "command-line-interface"]
 
 [dependencies]
 anyhow = "1.0"

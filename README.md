@@ -95,3 +95,7 @@ See [KEYBINDINGS.md](./KEYBINDS.md) for a list of keybindings used in the applic
 ### Contributing
 
 Contributions to `gitv` are welcome! If you have an idea for a new feature or have found a bug, please open an issue or submit a pull request on the GitHub repository.
+
+### License
+
+`gitv` is dual-licensed under the MIT License and the Unlicense, at your option. See the [MIT](./LICENSE-MIT) and [Unlicense](./UNLICENSE) for more information.
