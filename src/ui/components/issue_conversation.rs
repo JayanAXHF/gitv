@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use crossterm::event;
 use futures::{StreamExt, stream};
-use octocrab::models::{issues::Comment as ApiComment, reactions::ReactionContent};
+use octocrab::models::{IssueState, issues::Comment as ApiComment, reactions::ReactionContent};
 use pulldown_cmark::{
     BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd, TextMergeStream,
 };
 use rat_cursor::HasScreenCursor;
 use rat_widget::{
-    event::{HandleEvent, TextOutcome, ct_event},
+    event::{HandleEvent, Outcome, TextOutcome, ct_event},
     focus::{FocusBuilder, FocusFlag, HasFocus, Navigation},
     list::{ListState, selection::RowSelection},
     paragraph::{Paragraph, ParagraphState},
@@ -38,7 +38,11 @@ use crate::{
     app::GITHUB_CLIENT,
     ui::{
         Action,
-        components::{Component, help::HelpElementKind, issue_list::MainScreen},
+        components::{
+            Component,
+            help::HelpElementKind,
+            issue_list::{IssueClosePopupState, MainScreen, render_issue_close_popup},
+        },
         layout::Layout,
         utils::get_border_style,
     },
@@ -48,6 +52,8 @@ pub const HELP: &[HelpElementKind] = &[
     crate::help_text!("Issue Conversation Help"),
     crate::help_keybind!("Up/Down", "select issue body/comment entry"),
     crate::help_keybind!("PageUp/PageDown/Home/End", "scroll message body pane"),
+    crate::help_keybind!("C", "close selected issue"),
+    crate::help_keybind!("Enter (popup)", "confirm close reason"),
     crate::help_keybind!("Ctrl+P", "toggle comment input/preview"),
     crate::help_keybind!("r", "add reaction to selected comment"),
     crate::help_keybind!("R", "remove reaction from selected comment"),
@@ -133,6 +139,7 @@ pub struct IssueConversation {
     error: Option<String>,
     post_error: Option<String>,
     reaction_error: Option<String>,
+    close_error: Option<String>,
     owner: String,
     repo: String,
     current_user: String,
@@ -148,6 +155,7 @@ pub struct IssueConversation {
     paragraph_state: ParagraphState,
     body_paragraph_state: ParagraphState,
     reaction_mode: Option<ReactionMode>,
+    close_popup: Option<IssueClosePopupState>,
     index: usize,
 }
 
@@ -203,6 +211,7 @@ impl IssueConversation {
             error: None,
             post_error: None,
             reaction_error: None,
+            close_error: None,
             owner: app_state.owner,
             repo: app_state.repo,
             current_user: app_state.current_user,
@@ -217,6 +226,7 @@ impl IssueConversation {
             area: Rect::default(),
             body_paragraph_state: ParagraphState::default(),
             reaction_mode: None,
+            close_popup: None,
             index: 0,
         }
     }
@@ -242,6 +252,9 @@ impl IssueConversation {
                 title.push_str(" | ");
                 title.push_str(&prompt);
             } else if let Some(err) = &self.reaction_error {
+                title.push_str(" | ");
+                title.push_str(err);
+            } else if let Some(err) = &self.close_error {
                 title.push_str(" | ");
                 title.push_str(err);
             }
@@ -320,6 +333,7 @@ impl IssueConversation {
                 .use_type(WhichUse::Spin);
             StatefulWidget::render(throbber, title_area, buf, &mut self.post_throbber_state);
         }
+        self.render_close_popup(area.main_content, buf);
     }
 
     fn build_items(&mut self, list_area: Rect, body_area: Rect) -> Vec<ListItem<'static>> {
@@ -476,6 +490,107 @@ impl IssueConversation {
                 format_reaction_picker(*selected, options)
             )),
         }
+    }
+
+    fn open_close_popup(&mut self) {
+        let Some(seed) = &self.current else {
+            self.close_error = Some("No issue selected.".to_string());
+            return;
+        };
+        self.close_error = None;
+        self.close_popup = Some(IssueClosePopupState::new(seed.number));
+    }
+
+    fn render_close_popup(&mut self, area: Rect, buf: &mut Buffer) {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return;
+        };
+        render_issue_close_popup(popup, area, buf);
+    }
+
+    async fn submit_close_popup(&mut self) {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return;
+        };
+        if popup.loading {
+            return;
+        }
+        let reason = popup.selected_reason();
+        let number = popup.issue_number;
+        popup.loading = true;
+        popup.error = None;
+
+        let Some(action_tx) = self.action_tx.clone() else {
+            popup.loading = false;
+            popup.error = Some("Action channel unavailable.".to_string());
+            return;
+        };
+        let owner = self.owner.clone();
+        let repo = self.repo.clone();
+        tokio::spawn(async move {
+            let Some(client) = GITHUB_CLIENT.get() else {
+                let _ = action_tx
+                    .send(Action::IssueCloseError {
+                        number,
+                        message: "GitHub client not initialized.".to_string(),
+                    })
+                    .await;
+                return;
+            };
+            let issues = client.inner().issues(owner, repo);
+            match issues
+                .update(number)
+                .state(IssueState::Closed)
+                .state_reason(reason.to_octocrab())
+                .send()
+                .await
+            {
+                Ok(issue) => {
+                    let _ = action_tx
+                        .send(Action::IssueCloseSuccess {
+                            issue: Box::new(issue),
+                        })
+                        .await;
+                }
+                Err(err) => {
+                    let _ = action_tx
+                        .send(Action::IssueCloseError {
+                            number,
+                            message: err.to_string().replace('\n', " "),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    async fn handle_close_popup_event(&mut self, event: &event::Event) -> bool {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return false;
+        };
+        if popup.loading {
+            if matches!(event, ct_event!(keycode press Esc)) {
+                popup.loading = false;
+            }
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Esc)) {
+            self.close_popup = None;
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Up)) {
+            popup.select_prev_reason();
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Down)) {
+            popup.select_next_reason();
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Enter)) {
+            self.submit_close_popup().await;
+            return true;
+        }
+        true
     }
 
     fn start_add_reaction_mode(&mut self) {
@@ -897,6 +1012,9 @@ impl Component for IssueConversation {
                 if self.screen != MainScreen::Details {
                     return;
                 }
+                if self.handle_close_popup_event(event).await {
+                    return;
+                }
                 if self.handle_reaction_mode_event(event).await {
                     return;
                 }
@@ -917,7 +1035,15 @@ impl Component for IssueConversation {
                         self.start_remove_reaction_mode();
                         return;
                     }
-                    ct_event!(keycode press Tab) | ct_event!(keycode press SHIFT-Tab)
+                    event::Event::Key(key)
+                        if key.code == event::KeyCode::Char('C')
+                            && (self.list_state.is_focused()
+                                || self.body_paragraph_state.is_focused()) =>
+                    {
+                        self.open_close_popup();
+                        return;
+                    }
+                    ct_event!(keycode press Tab) | ct_event!(keycode press BackTab)
                         if self.input_state.is_focused() =>
                     {
                         self.action_tx
@@ -945,10 +1071,15 @@ impl Component for IssueConversation {
                         match self.textbox_state {
                             InputState::Input => {
                                 self.input_state.focus.set(true);
+                                self.paragraph_state.focus.set(false);
                             }
                             InputState::Preview => {
+                                self.input_state.focus.set(false);
                                 self.paragraph_state.focus.set(true);
                             }
+                        }
+                        if let Some(ref tx) = self.action_tx {
+                            let _ = tx.send(Action::ForceRender).await;
                         }
                     }
                     ct_event!(keycode press Enter) if self.list_state.is_focused() => {
@@ -974,9 +1105,28 @@ impl Component for IssueConversation {
                         self.send_comment(seed.number, trimmed.to_string()).await;
                         return;
                     }
+
                     event::Event::Key(key) if key.code != event::KeyCode::Tab => {
                         let o = self.input_state.handle(event, rat_widget::event::Regular);
-                        if o == TextOutcome::TextChanged {
+                        let o2 = self
+                            .paragraph_state
+                            .handle(event, rat_widget::event::Regular);
+                        if matches!(
+                            event,
+                            ct_event!(keycode press Up)
+                                | ct_event!(keycode press Down)
+                                | ct_event!(keycode press Left)
+                                | ct_event!(keycode press Right)
+                        ) {
+                            self.action_tx
+                                .as_ref()
+                                .unwrap()
+                                .send(Action::ForceRender)
+                                .await
+                                .unwrap();
+                        }
+                        if o == TextOutcome::TextChanged || o2 == Outcome::Changed {
+                            info!("Input changed, forcing re-render");
                             self.action_tx
                                 .as_ref()
                                 .unwrap()
@@ -999,7 +1149,9 @@ impl Component for IssueConversation {
                 self.current = Some(seed);
                 self.post_error = None;
                 self.reaction_error = None;
+                self.close_error = None;
                 self.reaction_mode = None;
+                self.close_popup = None;
                 self.body_cache = None;
                 self.body_cache_number = Some(number);
                 self.body_paragraph_state.set_line_offset(0);
@@ -1078,6 +1230,36 @@ impl Component for IssueConversation {
                     self.post_error = Some(message);
                 }
             }
+            Action::IssueCloseSuccess { issue } => {
+                let issue = *issue;
+                let initiated_here = self
+                    .close_popup
+                    .as_ref()
+                    .is_some_and(|popup| popup.issue_number == issue.number);
+                if initiated_here {
+                    self.close_popup = None;
+                    self.close_error = None;
+                    if let Some(action_tx) = self.action_tx.as_ref() {
+                        let _ = action_tx
+                            .send(Action::SelectedIssuePreview {
+                                seed: crate::ui::components::issue_detail::IssuePreviewSeed::from_issue(
+                                    &issue,
+                                ),
+                            })
+                            .await;
+                        let _ = action_tx.send(Action::RefreshIssueList).await;
+                    }
+                }
+            }
+            Action::IssueCloseError { number, message } => {
+                if let Some(popup) = self.close_popup.as_mut()
+                    && popup.issue_number == number
+                {
+                    popup.loading = false;
+                    popup.error = Some(message.clone());
+                    self.close_error = Some(message);
+                }
+            }
             Action::ChangeIssueScreen(screen) => {
                 self.screen = screen;
                 match screen {
@@ -1085,12 +1267,14 @@ impl Component for IssueConversation {
                         self.input_state.focus.set(false);
                         self.list_state.focus.set(false);
                         self.reaction_mode = None;
+                        self.close_popup = None;
                     }
                     MainScreen::Details => {}
                     MainScreen::CreateIssue => {
                         self.input_state.focus.set(false);
                         self.list_state.focus.set(false);
                         self.reaction_mode = None;
+                        self.close_popup = None;
                     }
                 }
             }
@@ -1100,6 +1284,11 @@ impl Component for IssueConversation {
                 }
                 if self.posting {
                     self.post_throbber_state.calc_next();
+                }
+                if let Some(popup) = self.close_popup.as_mut()
+                    && popup.loading
+                {
+                    popup.throbber_state.calc_next();
                 }
             }
             _ => {}
@@ -1115,12 +1304,18 @@ impl Component for IssueConversation {
     }
 
     fn is_animating(&self) -> bool {
-        self.screen == MainScreen::Details && (self.is_loading_current() || self.posting)
+        self.screen == MainScreen::Details
+            && (self.is_loading_current()
+                || self.posting
+                || self.close_popup.as_ref().is_some_and(|popup| popup.loading))
     }
 
     fn capture_focus_event(&self, event: &crossterm::event::Event) -> bool {
         if self.screen != MainScreen::Details {
             return false;
+        }
+        if self.close_popup.is_some() {
+            return true;
         }
         if !self.input_state.is_focused() {
             return false;

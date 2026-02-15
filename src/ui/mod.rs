@@ -428,6 +428,7 @@ pub enum Action {
     Tick,
     Quit,
     AppEvent(crossterm::event::Event),
+    RefreshIssueList,
     NewPage(Arc<Page<Issue>>, MergeStrategy),
     ForceRender,
     SelectedIssue {
@@ -479,6 +480,13 @@ pub enum Action {
     IssueCreateError {
         message: String,
     },
+    IssueCloseSuccess {
+        issue: Box<Issue>,
+    },
+    IssueCloseError {
+        number: u64,
+        message: String,
+    },
     IssueLabelsUpdated {
         number: u64,
         labels: Vec<Label>,
@@ -515,4 +523,31 @@ pub enum Action {
 pub enum MergeStrategy {
     Append,
     Replace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseIssueReason {
+    Completed,
+    NotPlanned,
+    Duplicate,
+}
+
+impl CloseIssueReason {
+    pub const ALL: [Self; 3] = [Self::Completed, Self::NotPlanned, Self::Duplicate];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Completed => "Completed",
+            Self::NotPlanned => "Not planned",
+            Self::Duplicate => "Duplicate",
+        }
+    }
+
+    pub const fn to_octocrab(self) -> octocrab::models::issues::IssueStateReason {
+        match self {
+            Self::Completed => octocrab::models::issues::IssueStateReason::Completed,
+            Self::NotPlanned => octocrab::models::issues::IssueStateReason::NotPlanned,
+            Self::Duplicate => octocrab::models::issues::IssueStateReason::Duplicate,
+        }
+    }
 }

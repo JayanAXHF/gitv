@@ -2,7 +2,7 @@ use crate::{
     app::GITHUB_CLIENT,
     errors::AppError,
     ui::{
-        Action, MergeStrategy,
+        Action, CloseIssueReason, MergeStrategy,
         components::{
             Component, help::HelpElementKind, issue_conversation::IssueConversationSeed,
             issue_detail::IssuePreviewSeed,
@@ -25,10 +25,13 @@ use rat_widget::{
 };
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style, Stylize},
+    layout::{Constraint, Rect},
+    style::{Color, Modifier, Style, Stylize},
     symbols,
-    widgets::{Block, ListItem, Padding, StatefulWidget},
+    widgets::{
+        Block, Clear, List as TuiList, ListItem, ListState as TuiListState, Padding,
+        StatefulWidget, Widget,
+    },
 };
 use ratatui_macros::{line, span, vertical};
 use std::sync::{
@@ -45,9 +48,12 @@ pub const HELP: &[HelpElementKind] = &[
     crate::help_text!("Issue List Help"),
     crate::help_keybind!("Up/Down", "navigate issues"),
     crate::help_keybind!("Enter", "view issue details"),
+    crate::help_keybind!("C", "close selected issue"),
+    crate::help_keybind!("Enter (popup)", "confirm close reason"),
     crate::help_keybind!("a", "add assignee(s)"),
     crate::help_keybind!("A", "remove assignee(s)"),
     crate::help_keybind!("n", "create new issue"),
+    crate::help_keybind!("Esc", "cancel popup / assign input"),
 ];
 pub struct IssueList<'a> {
     pub issues: Vec<IssueListItem>,
@@ -60,6 +66,8 @@ pub struct IssueList<'a> {
     pub assign_input_state: rat_widget::text_input::TextInputState,
     assign_loading: bool,
     assign_done_rx: Option<oneshot::Receiver<()>>,
+    close_popup: Option<IssueClosePopupState>,
+    close_error: Option<String>,
     pub owner: String,
     pub repo: String,
     index: usize,
@@ -67,6 +75,44 @@ pub struct IssueList<'a> {
     inner_state: IssueListState,
     assignment_mode: AssignmentMode,
     pub screen: MainScreen,
+}
+
+#[derive(Debug)]
+pub(crate) struct IssueClosePopupState {
+    pub(crate) issue_number: u64,
+    pub(crate) loading: bool,
+    pub(crate) throbber_state: ThrobberState,
+    pub(crate) error: Option<String>,
+    reason_state: TuiListState,
+}
+
+impl IssueClosePopupState {
+    pub(crate) fn new(issue_number: u64) -> Self {
+        let mut reason_state = TuiListState::default();
+        reason_state.select(Some(0));
+        Self {
+            issue_number,
+            loading: false,
+            throbber_state: ThrobberState::default(),
+            error: None,
+            reason_state,
+        }
+    }
+
+    pub(crate) fn select_next_reason(&mut self) {
+        self.reason_state.select_next();
+    }
+
+    pub(crate) fn select_prev_reason(&mut self) {
+        self.reason_state.select_previous();
+    }
+
+    pub(crate) fn selected_reason(&self) -> CloseIssueReason {
+        self.reason_state
+            .selected()
+            .and_then(|idx| CloseIssueReason::ALL.get(idx).copied())
+            .unwrap_or(CloseIssueReason::Completed)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -144,6 +190,8 @@ impl<'a> IssueList<'a> {
             assign_input_state: TextInputState::default(),
             assign_loading: false,
             assign_done_rx: None,
+            close_popup: None,
+            close_error: None,
             handler,
             index: 0,
             screen: MainScreen::default(),
@@ -152,6 +200,116 @@ impl<'a> IssueList<'a> {
             assignment_mode: AssignmentMode::default(),
         }
     }
+
+    fn open_close_popup(&mut self) {
+        let Some(selected) = self.list_state.selected_checked() else {
+            self.close_error = Some("No issue selected.".to_string());
+            return;
+        };
+        let Some(issue) = self.issues.get(selected).map(|item| &item.0) else {
+            self.close_error = Some("No issue selected.".to_string());
+            return;
+        };
+        if issue.state == IssueState::Closed {
+            self.close_error = Some("Selected issue is already closed.".to_string());
+            return;
+        }
+        self.close_error = None;
+        self.close_popup = Some(IssueClosePopupState::new(issue.number));
+    }
+
+    fn render_close_popup(&mut self, area: Rect, buf: &mut Buffer) {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return;
+        };
+        render_issue_close_popup(popup, area, buf);
+    }
+
+    async fn submit_close_popup(&mut self) {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return;
+        };
+        if popup.loading {
+            return;
+        }
+        let reason = popup.selected_reason();
+        let number = popup.issue_number;
+        popup.loading = true;
+        popup.error = None;
+
+        let Some(action_tx) = self.action_tx.clone() else {
+            popup.loading = false;
+            popup.error = Some("Action channel unavailable.".to_string());
+            return;
+        };
+        let owner = self.owner.clone();
+        let repo = self.repo.clone();
+        tokio::spawn(async move {
+            let Some(client) = GITHUB_CLIENT.get() else {
+                let _ = action_tx
+                    .send(Action::IssueCloseError {
+                        number,
+                        message: "GitHub client not initialized.".to_string(),
+                    })
+                    .await;
+                return;
+            };
+            let issues = client.inner().issues(owner, repo);
+            match issues
+                .update(number)
+                .state(IssueState::Closed)
+                .state_reason(reason.to_octocrab())
+                .send()
+                .await
+            {
+                Ok(issue) => {
+                    let _ = action_tx
+                        .send(Action::IssueCloseSuccess {
+                            issue: Box::new(issue),
+                        })
+                        .await;
+                }
+                Err(err) => {
+                    let _ = action_tx
+                        .send(Action::IssueCloseError {
+                            number,
+                            message: err.to_string().replace('\n', " "),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    async fn handle_close_popup_event(&mut self, event: &crossterm::event::Event) -> bool {
+        let Some(popup) = self.close_popup.as_mut() else {
+            return false;
+        };
+        if popup.loading {
+            if matches!(event, ct_event!(keycode press Esc)) {
+                popup.loading = false;
+            }
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Esc)) {
+            self.close_popup = None;
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Up)) {
+            popup.select_prev_reason();
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Down)) {
+            popup.select_next_reason();
+            return true;
+        }
+        if matches!(event, ct_event!(keycode press Enter)) {
+            self.submit_close_popup().await;
+            return true;
+        }
+        true
+    }
+
     pub fn render(&mut self, mut area: Layout, buf: &mut Buffer) {
         if self.assign_input_state.lost_focus() {
             self.inner_state = IssueListState::Normal;
@@ -168,7 +326,12 @@ impl<'a> IssueList<'a> {
             .border_style(get_border_style(&self.list_state))
             .padding(Padding::horizontal(3));
         if self.state != LoadingState::Loading {
-            block = block.title(format!("[{}] Issues", self.index));
+            let mut title = format!("[{}] Issues", self.index);
+            if let Some(err) = &self.close_error {
+                title.push_str(" | ");
+                title.push_str(err);
+            }
+            block = block.title(title);
         }
         let list = rat_widget::list::List::<RowSelection>::new(
             self.issues.iter().map(Into::<ListItem>::into),
@@ -189,7 +352,7 @@ impl<'a> IssueList<'a> {
                 .style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan))
                 .throbber_set(throbber_widgets_tui::BRAILLE_SIX_DOUBLE)
                 .use_type(throbber_widgets_tui::WhichUse::Spin);
-            full.render(title_area, buf, &mut self.throbber_state);
+            StatefulWidget::render(full, title_area, buf, &mut self.throbber_state);
         }
         if self.inner_state == IssueListState::AssigningInput {
             let mut input_block = Block::bordered()
@@ -215,9 +378,56 @@ impl<'a> IssueList<'a> {
                     .style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan))
                     .throbber_set(throbber_widgets_tui::BRAILLE_SIX_DOUBLE)
                     .use_type(throbber_widgets_tui::WhichUse::Spin);
-                full.render(title_area, buf, &mut self.assign_throbber_state);
+                StatefulWidget::render(full, title_area, buf, &mut self.assign_throbber_state);
             }
         }
+        self.render_close_popup(area.main_content, buf);
+    }
+}
+
+pub(crate) fn render_issue_close_popup(
+    popup: &mut IssueClosePopupState,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let popup_area = area.centered(Constraint::Percentage(20), Constraint::Length(5));
+    Clear.render(popup_area, buf);
+
+    let mut block = Block::bordered()
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title_bottom("Enter: close  Esc: cancel")
+        .title(format!("Close issue #{}", popup.issue_number));
+    if let Some(err) = &popup.error {
+        block = block.title(format!("Close issue #{} | {}", popup.issue_number, err));
+    }
+    let inner = block.inner(popup_area);
+    block.render(popup_area, buf);
+
+    if popup.reason_state.selected().is_none() {
+        popup.reason_state.select(Some(0));
+    }
+    let items = CloseIssueReason::ALL
+        .iter()
+        .map(|reason| ListItem::new(reason.label()))
+        .collect::<Vec<_>>();
+    let list = TuiList::new(items)
+        .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ");
+    StatefulWidget::render(list, inner, buf, &mut popup.reason_state);
+
+    if popup.loading {
+        let title_area = Rect {
+            x: popup_area.x + 1,
+            y: popup_area.y,
+            width: 10,
+            height: 1,
+        };
+        let throbber = throbber_widgets_tui::Throbber::default()
+            .label("Closing")
+            .style(Style::new().fg(Color::Cyan))
+            .throbber_set(throbber_widgets_tui::BRAILLE_SIX_DOUBLE)
+            .use_type(throbber_widgets_tui::WhichUse::Spin);
+        StatefulWidget::render(throbber, title_area, buf, &mut popup.throbber_state);
     }
 }
 
@@ -292,6 +502,11 @@ impl Component for IssueList<'_> {
                 if self.assign_loading {
                     self.assign_throbber_state.calc_next();
                 }
+                if let Some(popup) = self.close_popup.as_mut()
+                    && popup.loading
+                {
+                    popup.throbber_state.calc_next();
+                }
                 if let Some(rx) = self.assign_done_rx.as_mut()
                     && rx.try_recv().is_ok()
                 {
@@ -307,6 +522,9 @@ impl Component for IssueList<'_> {
             }
             crate::ui::Action::AppEvent(ref event) => {
                 if self.screen != MainScreen::List {
+                    return;
+                }
+                if self.handle_close_popup_event(event).await {
                     return;
                 }
                 if matches!(event, ct_event!(key press 'a')) && self.list_state.is_focused() {
@@ -340,6 +558,13 @@ impl Component for IssueList<'_> {
                         ))
                         .await
                         .unwrap();
+                    return;
+                }
+                if matches!(event, ct_event!(key press SHIFT-'C'))
+                    && self.list_state.is_focused()
+                    && self.inner_state == IssueListState::Normal
+                {
+                    self.open_close_popup();
                     return;
                 }
                 if matches!(event, ct_event!(keycode press Esc))
@@ -506,6 +731,38 @@ impl Component for IssueList<'_> {
             crate::ui::Action::FinishedLoading => {
                 self.state = LoadingState::Loaded;
             }
+            crate::ui::Action::IssueCloseSuccess { issue } => {
+                let issue = *issue;
+                if let Some(existing) = self.issues.iter_mut().find(|i| i.0.number == issue.number)
+                {
+                    existing.0 = issue.clone();
+                }
+                let initiated_here = self
+                    .close_popup
+                    .as_ref()
+                    .is_some_and(|popup| popup.issue_number == issue.number);
+                if initiated_here {
+                    self.close_popup = None;
+                    self.close_error = None;
+                    if let Some(action_tx) = self.action_tx.as_ref() {
+                        let _ = action_tx
+                            .send(Action::SelectedIssuePreview {
+                                seed: IssuePreviewSeed::from_issue(&issue),
+                            })
+                            .await;
+                        let _ = action_tx.send(Action::RefreshIssueList).await;
+                    }
+                }
+            }
+            crate::ui::Action::IssueCloseError { number, message } => {
+                if let Some(popup) = self.close_popup.as_mut()
+                    && popup.issue_number == number
+                {
+                    popup.loading = false;
+                    popup.error = Some(message.clone());
+                    self.close_error = Some(message);
+                }
+            }
             crate::ui::Action::IssueLabelsUpdated { number, labels } => {
                 if let Some(issue) = self.issues.iter_mut().find(|i| i.0.number == number) {
                     issue.0.labels = labels;
@@ -517,6 +774,7 @@ impl Component for IssueList<'_> {
                     self.list_state.focus.set(true);
                 } else {
                     self.list_state.focus.set(false);
+                    self.close_popup = None;
                 }
             }
             _ => {}
@@ -529,7 +787,9 @@ impl Component for IssueList<'_> {
 
     fn is_animating(&self) -> bool {
         self.screen == MainScreen::List
-            && (self.state == LoadingState::Loading || self.assign_loading)
+            && (self.state == LoadingState::Loading
+                || self.assign_loading
+                || self.close_popup.as_ref().is_some_and(|popup| popup.loading))
     }
     fn set_index(&mut self, index: usize) {
         self.index = index;
@@ -542,6 +802,10 @@ impl Component for IssueList<'_> {
             .unwrap()
             .try_send(crate::ui::Action::SetHelp(HELP))
             .unwrap();
+    }
+
+    fn capture_focus_event(&self, _event: &crossterm::event::Event) -> bool {
+        self.close_popup.is_some()
     }
 }
 
