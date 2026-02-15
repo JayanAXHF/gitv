@@ -32,7 +32,10 @@ const OPTIONS: [&str; 3] = ["Open", "Closed", "All"];
 pub const HELP: &[HelpElementKind] = &[
     crate::help_text!("Search Bar Help"),
     crate::help_keybind!("Type", "issue text in Search"),
-    crate::help_keybind!("Type", "labels in Search Labels (separate multiple with ';')"),
+    crate::help_keybind!(
+        "Type",
+        "labels in Search Labels (separate multiple with ';')"
+    ),
     crate::help_keybind!("Tab / Shift+Tab", "move between inputs and status selector"),
     crate::help_keybind!("Enter", "run search"),
 ];
@@ -211,6 +214,14 @@ impl Component for TextSearch {
         match event {
             Action::ChangeIssueScreen(screen) => {
                 self.screen = screen;
+            }
+            Action::RefreshIssueList => {
+                if self.screen != MainScreen::CreateIssue
+                    && self.state != State::Loading
+                    && let Some(action_tx) = self.action_tx.clone()
+                {
+                    self.execute_search(action_tx).await;
+                }
             }
             Action::AppEvent(ref event) => {
                 if self.screen == MainScreen::CreateIssue {

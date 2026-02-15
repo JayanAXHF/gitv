@@ -23,7 +23,8 @@ use crate::{
     ui::{
         Action, AppState,
         components::{
-            Component, help::HelpElementKind,
+            Component,
+            help::HelpElementKind,
             issue_conversation::{IssueConversationSeed, render_markdown_lines},
             issue_detail::IssuePreviewSeed,
             issue_list::MainScreen,
@@ -381,6 +382,21 @@ impl Component for IssueCreate {
                 self.labels_state.handle(event, rat_widget::event::Regular);
                 self.assignees_state
                     .handle(event, rat_widget::event::Regular);
+
+                if matches!(
+                    event,
+                    ct_event!(keycode press Up)
+                        | ct_event!(keycode press Down)
+                        | ct_event!(keycode press Left)
+                        | ct_event!(keycode press Right)
+                ) {
+                    self.action_tx
+                        .as_ref()
+                        .unwrap()
+                        .send(Action::ForceRender)
+                        .await
+                        .unwrap();
+                }
                 match self.mode {
                     InputMode::Input => {
                         if let event::Event::Key(key) = event
