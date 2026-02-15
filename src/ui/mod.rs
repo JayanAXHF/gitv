@@ -435,7 +435,7 @@ impl App {
                 }
             }
             let buf = f.buffer_mut();
-            let title = Paragraph::new(line!["IssueMe"].style(Style::new().bold()))
+            let title = Paragraph::new(line!["Gitv"].style(Style::new().bold()))
                 .block(Block::bordered().border_type(ratatui::widgets::BorderType::Rounded));
             title.render(layout.title_bar, buf);
 

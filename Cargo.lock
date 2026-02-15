@@ -1029,6 +1029,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "gitv"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "crossterm",
+ "directories",
+ "futures",
+ "inquire",
+ "keyring",
+ "octocrab",
+ "pulldown-cmark",
+ "rat-cursor",
+ "rat-widget",
+ "ratatui",
+ "ratatui-macros",
+ "regex",
+ "syntect",
+ "termprofile",
+ "textwrap",
+ "thiserror 2.0.18",
+ "throbber-widgets-tui",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1380,37 +1411,6 @@ name = "iset"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "855de4169757ca6b92b396d7a0380ef234e9a1ec2ec603c80779453ed0ab45e4"
-
-[[package]]
-name = "issue_me"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "crossterm",
- "directories",
- "futures",
- "inquire",
- "keyring",
- "octocrab",
- "pulldown-cmark",
- "rat-cursor",
- "rat-widget",
- "ratatui",
- "ratatui-macros",
- "regex",
- "syntect",
- "termprofile",
- "textwrap",
- "thiserror 2.0.18",
- "throbber-widgets-tui",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "itertools"

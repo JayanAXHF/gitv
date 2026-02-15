@@ -1,5 +1,5 @@
 use clap::Parser;
-use issue_me::{
+use gitv::{
     app::{App, cli::Cli},
     auth::AuthProvider,
     errors::AppError,
@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<(), AppError> {
         return Ok(());
     }
     if let Some(ref token) = cli.args.set_token {
-        let auth = issue_me::auth::keyring::KeyringAuth::new("issue_me")?;
+        let auth = gitv::auth::keyring::KeyringAuth::new("gitv")?;
         auth.set_token(token)?;
         return Ok(());
     }
