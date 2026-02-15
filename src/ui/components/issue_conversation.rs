@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use crossterm::event;
 use futures::{StreamExt, stream};
 use octocrab::models::{issues::Comment as ApiComment, reactions::ReactionContent};
-use pulldown_cmark::{BlockQuoteKind, Event, Options, Parser, Tag, TagEnd, TextMergeStream};
+use pulldown_cmark::{
+    BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd, TextMergeStream,
+};
 use rat_cursor::HasScreenCursor;
 use rat_widget::{
     event::{HandleEvent, TextOutcome, ct_event},
@@ -21,7 +23,12 @@ use ratatui::{
 use ratatui_macros::{horizontal, line, vertical};
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, OnceLock},
+};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{FontStyle, Theme, ThemeSet},
+    parsing::{SyntaxReference, SyntaxSet},
 };
 use textwrap::core::display_width;
 use throbber_widgets_tui::{BRAILLE_SIX_DOUBLE, Throbber, ThrobberState, WhichUse};
@@ -47,6 +54,27 @@ pub const HELP: &[HelpElementKind] = &[
     crate::help_keybind!("Ctrl+Enter / Alt+Enter", "send comment"),
     crate::help_keybind!("Esc", "return to issue list screen"),
 ];
+
+struct SyntectAssets {
+    syntaxes: SyntaxSet,
+    theme: Theme,
+}
+
+static SYNTECT_ASSETS: OnceLock<SyntectAssets> = OnceLock::new();
+
+fn syntect_assets() -> &'static SyntectAssets {
+    SYNTECT_ASSETS.get_or_init(|| {
+        let syntaxes = SyntaxSet::load_defaults_nonewlines();
+        let theme_set = ThemeSet::load_defaults();
+        let theme = theme_set
+            .themes
+            .get("base16-ocean.dark")
+            .or_else(|| theme_set.themes.values().next())
+            .cloned()
+            .expect("syntect default theme set should include at least one theme");
+        SyntectAssets { syntaxes, theme }
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct IssueConversationSeed {
@@ -1372,6 +1400,8 @@ struct MarkdownRenderer {
     block_quote_style: Option<AdmonitionStyle>,
     block_quote_title_pending: bool,
     in_code_block: bool,
+    code_block_lang: Option<String>,
+    code_block_buf: String,
     list_prefix: Option<String>,
     pending_space: bool,
 }
@@ -1435,6 +1465,8 @@ impl MarkdownRenderer {
             block_quote_style: None,
             block_quote_title_pending: false,
             in_code_block: false,
+            code_block_lang: None,
+            code_block_buf: String::new(),
             list_prefix: None,
             pending_space: false,
         }
@@ -1462,9 +1494,12 @@ impl MarkdownRenderer {
                 self.block_quote_style = kind.and_then(AdmonitionStyle::from_block_quote_kind);
                 self.block_quote_title_pending = self.block_quote_style.is_some();
             }
-            Tag::CodeBlock(..) => {
+            Tag::CodeBlock(kind) => {
+                self.ensure_admonition_header();
                 self.flush_line();
                 self.in_code_block = true;
+                self.code_block_lang = code_block_kind_lang(kind);
+                self.code_block_buf.clear();
             }
             Tag::Item => {
                 self.flush_line();
@@ -1496,8 +1531,11 @@ impl MarkdownRenderer {
                 self.push_blank_line();
             }
             TagEnd::CodeBlock => {
+                self.render_code_block();
                 self.flush_line();
                 self.in_code_block = false;
+                self.code_block_lang = None;
+                self.code_block_buf.clear();
                 self.push_blank_line();
             }
             TagEnd::Item => {
@@ -1557,7 +1595,7 @@ impl MarkdownRenderer {
     fn soft_break(&mut self) {
         self.ensure_admonition_header();
         if self.in_code_block {
-            self.hard_break();
+            self.code_block_buf.push('\n');
         } else {
             self.pending_space = true;
         }
@@ -1565,6 +1603,10 @@ impl MarkdownRenderer {
 
     fn hard_break(&mut self) {
         self.ensure_admonition_header();
+        if self.in_code_block {
+            self.code_block_buf.push('\n');
+            return;
+        }
         self.flush_line();
     }
 
@@ -1667,13 +1709,44 @@ impl MarkdownRenderer {
     }
 
     fn code_block_text(&mut self, text: &str) {
-        let style = Style::new().light_yellow();
-        for line in text.split('\n') {
+        self.code_block_buf.push_str(text);
+    }
+
+    fn render_code_block(&mut self) {
+        if self.code_block_buf.is_empty() {
+            return;
+        }
+
+        let code = std::mem::take(&mut self.code_block_buf);
+        let assets = syntect_assets();
+        let syntax = resolve_syntax(&assets.syntaxes, self.code_block_lang.as_deref());
+        let mut highlighter = HighlightLines::new(syntax, &assets.theme);
+        let fallback_style = Style::new().light_yellow();
+
+        for raw_line in code.split('\n') {
             self.flush_line();
             self.start_line();
-            self.current_line
-                .push(Span::styled(line.to_string(), style));
-            self.current_width += display_width(line);
+            match highlighter.highlight_line(raw_line, &assets.syntaxes) {
+                Ok(regions) => {
+                    for (syn_style, fragment) in regions {
+                        if fragment.is_empty() {
+                            continue;
+                        }
+                        self.current_line.push(Span::styled(
+                            fragment.to_string(),
+                            syntect_style_to_ratatui(syn_style),
+                        ));
+                        self.current_width += display_width(fragment);
+                    }
+                }
+                Err(_) => {
+                    if !raw_line.is_empty() {
+                        self.current_line
+                            .push(Span::styled(raw_line.to_string(), fallback_style));
+                        self.current_width += display_width(raw_line);
+                    }
+                }
+            }
             self.flush_line();
         }
     }
@@ -1790,4 +1863,59 @@ fn extract_admonition_title<'a>(text: &'a str, marker: &str) -> Option<&'a str> 
         return None;
     }
     Some(trimmed[marker_end + 1..].trim())
+}
+
+fn code_block_kind_lang(kind: CodeBlockKind<'_>) -> Option<String> {
+    match kind {
+        CodeBlockKind::Indented => None,
+        CodeBlockKind::Fenced(info) => parse_fenced_language(&info).map(|lang| lang.to_lowercase()),
+    }
+}
+
+fn parse_fenced_language(info: &str) -> Option<&str> {
+    let token = info
+        .split_ascii_whitespace()
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|c| c == '{' || c == '}');
+    let token = token.strip_prefix('.').unwrap_or(token);
+    if token.is_empty() { None } else { Some(token) }
+}
+
+fn resolve_syntax<'a>(syntaxes: &'a SyntaxSet, lang: Option<&str>) -> &'a SyntaxReference {
+    if let Some(lang) = lang {
+        if let Some(syntax) = syntaxes.find_syntax_by_token(lang) {
+            return syntax;
+        }
+        if let Some(stripped) = lang.strip_prefix("language-")
+            && let Some(syntax) = syntaxes.find_syntax_by_token(stripped)
+        {
+            return syntax;
+        }
+        if let Some(syntax) = syntaxes.find_syntax_by_extension(lang) {
+            return syntax;
+        }
+    }
+    syntaxes.find_syntax_plain_text()
+}
+
+fn syntect_style_to_ratatui(style: syntect::highlighting::Style) -> Style {
+    let mut out = Style::new().fg(Color::Rgb(
+        style.foreground.r,
+        style.foreground.g,
+        style.foreground.b,
+    ));
+    if style.font_style.contains(FontStyle::BOLD) {
+        out = out.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(FontStyle::ITALIC) {
+        out = out.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(FontStyle::UNDERLINE) {
+        out = out.add_modifier(Modifier::UNDERLINED);
+    }
+    out
 }
