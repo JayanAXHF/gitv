@@ -15,7 +15,7 @@ pub struct Layout {
 
 impl Layout {
     pub fn new(area: Rect) -> Self {
-        let [title_bar, main, status_bar] = vertical![==3, *=1, ==1].areas(area);
+        let [title_bar, main, status_bar] = vertical![==1, *=1, ==1].areas(area);
         let [left, right] = horizontal![==70%, *=1].areas(main);
         let [label_list, issue_preview] = vertical![*=1, *=1].areas(right);
         let [text_search, bottom_search, main_content] = vertical![==3, ==3, *=1].areas(left);

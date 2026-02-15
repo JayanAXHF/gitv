@@ -19,6 +19,7 @@ use crate::{
         label_list::LabelList,
         search_bar::TextSearch,
         status_bar::StatusBar,
+        title_bar::TitleBar,
     },
 };
 use crossterm::{
@@ -39,7 +40,6 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Clear, Padding, Paragraph, Wrap},
 };
-use ratatui_macros::line;
 use std::{
     collections::HashMap,
     io::stdout,
@@ -191,7 +191,11 @@ impl App {
             last_event_error: None,
             cancel_action: Default::default(),
             components: comps,
-            dumb_components: vec![Box::new(status_bar), Box::new(issue_preview)],
+            dumb_components: vec![
+                Box::new(status_bar),
+                Box::new(issue_preview),
+                Box::new(TitleBar),
+            ],
         })
     }
     pub async fn run(
@@ -435,9 +439,6 @@ impl App {
                 }
             }
             let buf = f.buffer_mut();
-            let title = Paragraph::new(line!["Gitv"].style(Style::new().bold()))
-                .block(Block::bordered().border_type(ratatui::widgets::BorderType::Rounded));
-            title.render(layout.title_bar, buf);
 
             for component in self.components.iter_mut() {
                 if component.should_render() {

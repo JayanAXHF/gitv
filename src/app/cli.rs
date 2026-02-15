@@ -3,8 +3,10 @@ use std::{fmt::Display, str::FromStr};
 use clap::Parser;
 use tracing_subscriber::filter::{self, Directive};
 
+use crate::logging::get_data_dir;
+
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None, styles = get_styles())]
+#[clap(author, version = version(), about, long_about = None, styles = get_styles())]
 pub struct Cli {
     /// Top-level CLI arguments controlling repository selection and runtime behavior.
     #[clap(flatten)]
@@ -111,4 +113,29 @@ pub fn get_styles() -> clap::builder::Styles {
                 .bold()
                 .fg_color(Some(Color::Ansi(AnsiColor::BrightBlue))),
         )
+}
+
+pub const VERSION_MESSAGE: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "-",
+    env!("VERGEN_GIT_DESCRIBE"),
+    " (",
+    env!("VERGEN_BUILD_DATE"),
+    ")"
+);
+
+pub fn version() -> String {
+    let author = clap::crate_authors!();
+
+    // let current_exe_path = PathBuf::from(clap::crate_name!()).display().to_string();
+    let data_dir_path = get_data_dir().display().to_string();
+
+    format!(
+        "\
+{VERSION_MESSAGE}
+
+Authors: {author}
+
+Data directory: {data_dir_path}"
+    )
 }
