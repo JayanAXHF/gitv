@@ -3,7 +3,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{BlockExt, Clear, Widget},
 };
-use tracing::info;
+use tracing::trace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpElementKind {
@@ -88,8 +88,8 @@ impl<'a> HelpComponent<'a> {
 impl<'a> Widget for HelpComponent<'a> {
     fn render(mut self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         use ratatui::layout::Constraint::{Length, Percentage};
-        info!(content = ?self.content, "Rendering HelpComponent");
-        info!(content_length = ?self.content.len(), "Content length");
+        trace!(content = ?self.content, "Rendering HelpComponent");
+        trace!(content_length = ?self.content.len(), "Content length");
         let mut centered_area = if self.contraint != 0 {
             area.centered(Percentage(self.contraint), Length(self.contraint))
         } else {

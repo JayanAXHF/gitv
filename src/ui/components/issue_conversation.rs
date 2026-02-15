@@ -32,7 +32,7 @@ use syntect::{
 };
 use textwrap::core::display_width;
 use throbber_widgets_tui::{BRAILLE_SIX_DOUBLE, Throbber, ThrobberState, WhichUse};
-use tracing::info;
+use tracing::trace;
 
 use crate::{
     app::GITHUB_CLIENT,
@@ -243,7 +243,7 @@ impl IssueConversation {
         let body_area = content_split[1];
 
         let items = self.build_items(list_area, body_area);
-        info!("Rendering {} comments", items.len());
+        trace!("Rendering {} comments", items.len());
         let mut list_block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(get_border_style(&self.list_state));
@@ -392,7 +392,7 @@ impl IssueConversation {
         }
 
         if self.cache_number == Some(seed.number) {
-            info!(
+            trace!(
                 "Rendering {} comments for #{}",
                 self.cache_comments.len(),
                 seed.number
@@ -908,7 +908,7 @@ impl IssueConversation {
                     let comment_ids = comments.iter().map(|c| c.id.0).collect::<Vec<_>>();
                     let comments: Vec<CommentView> =
                         comments.into_iter().map(CommentView::from_api).collect();
-                    info!("Loaded {} comments for issue {}", comments.len(), number);
+                    trace!("Loaded {} comments for issue {}", comments.len(), number);
                     let _ = action_tx
                         .send(Action::IssueCommentsLoaded { number, comments })
                         .await;
@@ -1103,7 +1103,7 @@ impl Component for IssueConversation {
                             .map_err(|_| AppError::TokioMpsc)?;
                     }
                     ct_event!(keycode press CONTROL-Enter) | ct_event!(keycode press ALT-Enter) => {
-                        info!("Enter pressed");
+                        trace!("Enter pressed");
                         let Some(seed) = &self.current else {
                             return Ok(());
                         };
@@ -1141,7 +1141,7 @@ impl Component for IssueConversation {
                                 .map_err(|_| AppError::TokioMpsc)?;
                         }
                         if o == TextOutcome::TextChanged || o2 == Outcome::Changed {
-                            info!("Input changed, forcing re-render");
+                            trace!("Input changed, forcing re-render");
                             let action_tx = self.action_tx.as_ref().ok_or_else(|| {
                                 AppError::Other(anyhow!(
                                     "issue conversation action channel unavailable"
@@ -1189,7 +1189,7 @@ impl Component for IssueConversation {
                 self.loading.remove(&number);
                 if self.current.as_ref().is_some_and(|s| s.number == number) {
                     self.cache_number = Some(number);
-                    info!("Setting {} comments for #{}", comments.len(), number);
+                    trace!("Setting {} comments for #{}", comments.len(), number);
                     self.cache_comments = comments;
                     self.markdown_cache.clear();
                     self.body_cache = None;

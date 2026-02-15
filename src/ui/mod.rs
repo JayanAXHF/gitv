@@ -48,7 +48,7 @@ use std::{
 use termprofile::{DetectorSettings, TermProfile};
 use tokio::{select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument};
+use tracing::{instrument, trace};
 
 use anyhow::anyhow;
 
@@ -279,12 +279,12 @@ impl App {
                 Some(Action::ForceFocusChange) => {
                     let focus = focus(self)?;
                     let r = focus.next_force();
-                    info!(outcome = ?r, "Focus");
+                    trace!(outcome = ?r, "Focus");
                 }
                 Some(Action::ForceFocusChangeRev) => {
                     let focus = focus(self)?;
                     let r = focus.prev_force();
-                    info!(outcome = ?r, "Focus");
+                    trace!(outcome = ?r, "Focus");
                 }
                 Some(Action::AppEvent(ref event)) => {
                     self.handle_event(event).await?;
@@ -314,7 +314,7 @@ impl App {
         use crossterm::event::Event::Key;
         use crossterm::event::KeyCode::*;
         use rat_widget::event::ct_event;
-        info!(?event, "Handling event");
+        trace!(?event, "Handling event");
         if matches!(
             event,
             ct_event!(key press CONTROL-'c') | ct_event!(key press CONTROL-'q')
@@ -347,7 +347,7 @@ impl App {
             .any(|c| c.should_render() && c.capture_focus_event(event));
         let focus = focus(self)?;
         let outcome = focus.handle(event, Regular);
-        info!(outcome = ?outcome, "Focus");
+        trace!(outcome = ?outcome, "Focus");
         if let Outcome::Continue = outcome
             && let Key(key) = event
             && !capture_focus
@@ -374,7 +374,7 @@ impl App {
                             AppError::Other(anyhow!("focus shortcut is out of expected range"))
                         })?;
                     //SAFETY: cid is always in map, and map is static
-                    info!("Focusing {}", index);
+                    trace!("Focusing {}", index);
                     let cid_map = CIDMAP
                         .get()
                         .ok_or_else(|| AppError::ErrorSettingGlobal("component id map"))?;

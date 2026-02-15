@@ -42,7 +42,7 @@ use std::sync::{
 use textwrap::{Options, wrap};
 use throbber_widgets_tui::ThrobberState;
 use tokio::sync::oneshot;
-use tracing::info;
+use tracing::trace;
 
 pub static LOADED_ISSUE_COUNT: AtomicU32 = AtomicU32::new(0);
 pub const HELP: &[HelpElementKind] = &[
@@ -747,7 +747,7 @@ impl Component for IssueList<'_> {
                 }
             }
             crate::ui::Action::NewPage(p, merge_strat) => {
-                info!("New Page with {} issues", p.items.len());
+                trace!("New Page with {} issues", p.items.len());
                 match merge_strat {
                     MergeStrategy::Replace => {
                         self.issues = p.items.iter().cloned().map(IssueListItem).collect()
@@ -830,7 +830,7 @@ impl Component for IssueList<'_> {
     }
 
     fn set_global_help(&self) {
-        info!("Setting global help for IssueList");
+        trace!("Setting global help for IssueList");
         if let Some(action_tx) = self.action_tx.as_ref() {
             let _ = action_tx.try_send(crate::ui::Action::SetHelp(HELP));
         }

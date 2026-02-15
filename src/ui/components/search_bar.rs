@@ -14,8 +14,8 @@ use ratatui::{
 };
 use std::sync::Arc;
 use throbber_widgets_tui::ThrobberState;
-use tracing::info;
 use tracing::instrument;
+use tracing::trace;
 
 use crate::{
     app::GITHUB_CLIENT,
@@ -142,7 +142,7 @@ impl TextSearch {
             search.push_str(&label_q.collect::<Vec<_>>().join(" "));
         }
         let status = self.cstate.selected();
-        info!(status, "Searching with status");
+        trace!(status, "Searching with status");
         if let Some(status) = status
             && status != 2
         {
@@ -152,7 +152,7 @@ impl TextSearch {
         search.push(' ');
         search.push_str(&repo_q);
         search.push_str(" is:issue");
-        info!(search, "Searching with query");
+        trace!(search, "Searching with query");
         self.state = State::Loading;
         tokio::spawn(async move {
             let client = GITHUB_CLIENT.get().ok_or_else(|| {
