@@ -17,8 +17,8 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, ListItem, StatefulWidget},
+    text::{Line, Span, Text},
+    widgets::{self, Block, ListItem, StatefulWidget, Widget},
 };
 use ratatui_macros::{horizontal, line, vertical};
 use std::{
@@ -30,7 +30,7 @@ use syntect::{
     highlighting::{FontStyle, Theme, ThemeSet},
     parsing::{SyntaxReference, SyntaxSet},
 };
-use textwrap::core::display_width;
+use textwrap::{core::display_width, wrap};
 use throbber_widgets_tui::{BRAILLE_SIX_DOUBLE, Throbber, ThrobberState, WhichUse};
 use tracing::trace;
 
@@ -90,6 +90,7 @@ pub struct IssueConversationSeed {
     pub author: Arc<str>,
     pub created_at: Arc<str>,
     pub body: Option<Arc<str>>,
+    pub title: Option<Arc<str>>,
 }
 
 impl IssueConversationSeed {
@@ -99,6 +100,7 @@ impl IssueConversationSeed {
             author: Arc::<str>::from(issue.user.login.as_str()),
             created_at: Arc::<str>::from(issue.created_at.format("%Y-%m-%d %H:%M").to_string()),
             body: issue.body.as_ref().map(|b| Arc::<str>::from(b.as_str())),
+            title: Some(Arc::<str>::from(issue.title.as_str())),
         }
     }
 }
@@ -128,6 +130,7 @@ impl CommentView {
 }
 
 pub struct IssueConversation {
+    title: Option<Arc<str>>,
     action_tx: Option<tokio::sync::mpsc::Sender<Action>>,
     current: Option<IssueConversationSeed>,
     cache_number: Option<u64>,
@@ -199,6 +202,7 @@ impl InputState {
 impl IssueConversation {
     pub fn new(app_state: crate::ui::AppState) -> Self {
         Self {
+            title: None,
             action_tx: None,
             current: None,
             cache_number: None,
@@ -235,15 +239,25 @@ impl IssueConversation {
 
     pub fn render(&mut self, area: Layout, buf: &mut Buffer) {
         self.area = area.main_content;
-        let areas = vertical![*=1, ==5].split(area.main_content);
-        let content_area = areas[0];
-        let input_area = areas[1];
+        let title = self.title.clone().unwrap_or_default();
+        let wrapped_title = wrap(&title, area.main_content.width.saturating_sub(2) as usize);
+        let title_para_height = wrapped_title.len() as u16 + 2;
+        let title_para = Text::from_iter(wrapped_title);
+
+        let areas = vertical![==title_para_height, *=1, ==5].split(area.main_content);
+        let title_area = areas[0];
+        let content_area = areas[1];
+        let input_area = areas[2];
         let content_split = horizontal![*=1, *=1].split(content_area);
         let list_area = content_split[0];
         let body_area = content_split[1];
-
         let items = self.build_items(list_area, body_area);
-        trace!("Rendering {} comments", items.len());
+
+        let title_widget = widgets::Paragraph::new(title_para)
+            .block(Block::bordered().border_type(ratatui::widgets::BorderType::Rounded))
+            .style(Style::default().add_modifier(Modifier::BOLD));
+        title_widget.render(title_area, buf);
+
         let mut list_block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(get_border_style(&self.list_state));
@@ -1164,6 +1178,7 @@ impl Component for IssueConversation {
             }
             Action::EnterIssueDetails { seed } => {
                 let number = seed.number;
+                self.title = seed.title.clone();
                 self.current = Some(seed);
                 self.post_error = None;
                 self.reaction_error = None;
