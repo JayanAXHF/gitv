@@ -23,7 +23,13 @@
 
 ### Installation
 
-#### Using git
+#### Using Cargo
+
+```bash
+cargo install --locked gitv-tui
+```
+
+#### From Source
 
 1. Clone the repository:
 
@@ -42,10 +48,6 @@ cd gitv
 ```bash
 cargo install --path .
 ```
-
-#### Using cargo
-
-Coming Soon!
 
 ### Usage
 
