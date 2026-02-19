@@ -1,5 +1,5 @@
 use clap::Parser;
-use gitv::{
+use gitv_tui::{
     app::{
         App,
         cli::{Cli, generate_man_pages},
@@ -22,7 +22,8 @@ async fn main() -> anyhow::Result<(), AppError> {
         return Ok(());
     }
     if let Some(ref token) = cli.args.set_token {
-        let auth = gitv::auth::keyring::KeyringAuth::new("gitv")?;
+        let auth = gitv_tui::auth::keyring::KeyringAuth::new("gitv")?;
+
         auth.set_token(token)?;
         return Ok(());
     }
