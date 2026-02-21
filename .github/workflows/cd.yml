@@ -41,8 +41,6 @@ jobs:
             os: ubuntu-22.04
           - target: x86_64-pc-windows-msvc
             os: windows-2022
-          - target: x86_64-unknown-freebsd
-            os: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - name: Checkout repository
