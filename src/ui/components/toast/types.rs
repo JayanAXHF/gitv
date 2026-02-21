@@ -237,30 +237,29 @@ impl ToastPosition {
                 height,
             },
             TopRight => Rect {
-                x: area.x + area.width - width,
+                x: area.x + area.width.saturating_sub(width),
                 y: area.y,
                 width,
                 height,
             },
             BottomLeft => Rect {
                 x: area.x,
-                y: area.y + area.height - height,
+                y: area.y + area.height.saturating_sub(height),
                 width,
                 height,
             },
             BottomRight => Rect {
-                x: area.x + area.width - width,
-                y: area.y + area.height - height,
+                x: area.x + area.width.saturating_sub(width),
+                y: area.y + area.height.saturating_sub(height),
                 width,
                 height,
             },
             Center => Rect {
-                x: area.x + (area.width - width) / 2,
-                y: area.y + (area.height - height) / 2,
+                x: area.x + (area.width.saturating_sub(width)) / 2,
+                y: area.y + (area.height.saturating_sub(height)) / 2,
                 width,
                 height,
             },
-        }
     }
 }
 
