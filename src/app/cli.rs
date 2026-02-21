@@ -44,6 +44,10 @@ pub struct Args {
     /// Generate man pages using clap-mangen and exit.
     #[clap(long)]
     pub generate_man: bool,
+
+    /// When provided, this command will read the GitHub token from the environment variable
+    #[clap(short, long)]
+    pub env: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
