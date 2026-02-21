@@ -20,6 +20,7 @@ use crate::{
         search_bar::TextSearch,
         status_bar::StatusBar,
         title_bar::TitleBar,
+        toast::{ToastBuilder, ToastEngineBuilder, ToastMessage},
     },
 };
 use crossterm::{
@@ -41,7 +42,7 @@ use rat_widget::{
 use ratatui::{
     crossterm,
     prelude::*,
-    widgets::{Block, Clear, Padding, Paragraph, Wrap},
+    widgets::{Block, Clear, Padding, Paragraph, WidgetRef, Wrap},
 };
 use std::{
     collections::HashMap,
@@ -110,6 +111,7 @@ pub async fn run(
 struct App {
     action_tx: tokio::sync::mpsc::Sender<Action>,
     action_rx: tokio::sync::mpsc::Receiver<Action>,
+    toast_engine: Option<components::toast::ToastEngine<Action>>,
     focus: Option<Focus>,
     cancel_action: CancellationToken,
     components: Vec<Box<dyn Component>>,
@@ -197,6 +199,7 @@ impl App {
         )?;
         Ok(Self {
             focus: None,
+            toast_engine: None,
             in_help: false,
             in_editor: false,
             current_screen: MainScreen::default(),
@@ -259,6 +262,8 @@ impl App {
             }
         }
         let ctok = self.cancel_action.clone();
+        let builder = ToastEngineBuilder::new(Rect::default()).action_tx(self.action_tx.clone());
+        self.toast_engine = Some(builder.build());
         loop {
             let action = self.action_rx.recv().await;
             let mut should_draw_error_popup = false;
@@ -303,6 +308,26 @@ impl App {
             };
             match action {
                 Some(Action::None) | Some(Action::Tick) => {}
+                Some(Action::ToastAction(ref toast_action)) => match toast_action {
+                    ToastMessage::Show {
+                        message,
+                        toast_type,
+                        position,
+                    } => {
+                        if let Some(ref mut toast_engine) = self.toast_engine {
+                            toast_engine.show_toast(
+                                ToastBuilder::new(message.clone().into())
+                                    .toast_type(*toast_type)
+                                    .position(*position),
+                            );
+                        }
+                    }
+                    ToastMessage::Hide => {
+                        if let Some(ref mut toast_engine) = self.toast_engine {
+                            toast_engine.hide_toast();
+                        }
+                    }
+                },
                 Some(Action::ForceFocusChange) => match focus(self) {
                     Ok(focus) => {
                         let r = focus.next_force();
@@ -534,6 +559,10 @@ impl App {
                     );
                 popup.render(popup_area, buf);
             }
+            if let Some(ref mut toast_engine) = self.toast_engine {
+                toast_engine.set_area(area);
+                toast_engine.render_ref(area, f.buffer_mut());
+            }
         })?;
         Ok(())
     }
@@ -653,6 +682,13 @@ pub enum Action {
     ForceFocusChangeRev,
     SetHelp(&'static [HelpElementKind]),
     EditorModeChanged(bool),
+    ToastAction(crate::ui::components::toast::ToastMessage),
+}
+
+impl From<crate::ui::components::toast::ToastMessage> for Action {
+    fn from(value: crate::ui::components::toast::ToastMessage) -> Self {
+        Self::ToastAction(value)
+    }
 }
 
 #[derive(Debug, Clone)]

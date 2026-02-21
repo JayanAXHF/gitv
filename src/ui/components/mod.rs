@@ -15,6 +15,7 @@ pub mod label_list;
 pub mod search_bar;
 pub mod status_bar;
 pub mod title_bar;
+pub mod toast;
 
 #[async_trait(?Send)]
 pub trait DumbComponent {
