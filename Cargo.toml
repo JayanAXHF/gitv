@@ -34,7 +34,7 @@ pulldown-cmark = "0.13.0"
 regex = "1.11.1"
 rat-cursor = "2.0.0"
 rat-widget = "3.1.1"
-ratatui = "0.30.0"
+ratatui = {version = "0.30.0", features = ["unstable-widget-ref"] }
 ratatui-macros = "0.7.0"
 termprofile = { version = "0.2.0", features = ["convert", "ratatui"] }
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
