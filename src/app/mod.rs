@@ -19,7 +19,11 @@ pub static GITHUB_CLIENT: OnceLock<GithubClient> = OnceLock::new();
 impl App {
     pub async fn new(cli: Cli) -> Result<Self, AppError> {
         logging::init(LoggingConfig::new(cli.args.log_level))?;
-        let auth = crate::auth::keyring::KeyringAuth::new("gitv")?;
+        let auth = if cli.args.env {
+            Box::new(crate::auth::env::EnvAuth) as Box<dyn AuthProvider>
+        } else {
+            Box::new(crate::auth::keyring::KeyringAuth::new("gitv")?) as Box<dyn AuthProvider>
+        };
         let token = match auth.get_token().ok() {
             Some(token) => token,
             None => Self::handle_no_token(&auth)?,
