@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.2.1...gitv-tui-v0.3.0) - 2026-02-22
+
+### Added
+
+- add animations to the toasts
+
+### Other
+
+- refactor!(toasts): Refactor out the toast component into a standalone crate (`ratatui-toaster`)
+
 ## [0.2.1](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.2.0...gitv-tui-v0.2.1) - 2026-02-21
 
 ### Fixed
