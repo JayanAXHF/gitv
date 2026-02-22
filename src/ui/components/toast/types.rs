@@ -157,8 +157,13 @@ where
                 let _ = tx_clone.send(ToastMessage::Hide.into()).await;
             });
         }
-        // Here you would implement the logic to display the toast message
-        // based on the toast_type and position. This is a placeholder implementation.
+    }
+    pub fn toast_area(&self) -> Rect {
+        self.toast_area
+    }
+
+    pub fn has_toast(&self) -> bool {
+        self.current_toast.is_some()
     }
 
     pub fn hide_toast(&mut self) {

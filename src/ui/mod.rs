@@ -49,7 +49,9 @@ use std::{
     fmt::Display,
     io::stdout,
     sync::{Arc, OnceLock},
+    time::{self},
 };
+use tachyonfx::{EffectManager, Interpolation, fx};
 use termprofile::{DetectorSettings, TermProfile};
 use tokio::{select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -62,7 +64,7 @@ use crate::ui::components::{
     issue_detail::{IssuePreviewSeed, PrSummary},
 };
 
-const TICK_RATE: std::time::Duration = std::time::Duration::from_millis(100);
+const TICK_RATE: std::time::Duration = std::time::Duration::from_millis(60);
 pub static COLOR_PROFILE: OnceLock<TermProfile> = OnceLock::new();
 pub static CIDMAP: OnceLock<HashMap<u8, usize>> = OnceLock::new();
 const HELP_TEXT: &[HelpElementKind] = &[
@@ -119,9 +121,11 @@ struct App {
     help: Option<&'static [HelpElementKind]>,
     in_help: bool,
     in_editor: bool,
+    last_frame: time::Instant,
     current_screen: MainScreen,
     last_focused: Option<FocusFlag>,
     last_event_error: Option<String>,
+    effects_manager: EffectManager<()>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -197,14 +201,18 @@ impl App {
              4 -> label_list,
              1 -> text_search, // this needs to be the last one
         )?;
+        let effects_manager = EffectManager::default();
+
         Ok(Self {
             focus: None,
             toast_engine: None,
             in_help: false,
+            last_frame: time::Instant::now(),
             in_editor: false,
             current_screen: MainScreen::default(),
             help: None,
             action_tx,
+            effects_manager,
             action_rx,
             last_focused: None,
             last_event_error: None,
@@ -307,7 +315,7 @@ impl App {
                 _ => true,
             };
             match action {
-                Some(Action::None) | Some(Action::Tick) => {}
+                Some(Action::Tick) => {}
                 Some(Action::ToastAction(ref toast_action)) => match toast_action {
                     ToastMessage::Show {
                         message,
@@ -320,11 +328,30 @@ impl App {
                                     .toast_type(*toast_type)
                                     .position(*position),
                             );
+
+                            let fx = fx::slide_in(
+                                tachyonfx::Motion::RightToLeft,
+                                0,
+                                0,
+                                Color::from(*toast_type),
+                                (420, Interpolation::Linear),
+                            )
+                            .with_area(toast_engine.toast_area());
+                            self.effects_manager.add_effect(fx);
                         }
                     }
                     ToastMessage::Hide => {
                         if let Some(ref mut toast_engine) = self.toast_engine {
                             toast_engine.hide_toast();
+                            let fx = fx::slide_in(
+                                tachyonfx::Motion::LeftToRight,
+                                0,
+                                0,
+                                Color::Reset,
+                                (420, Interpolation::Linear),
+                            )
+                            .with_area(toast_engine.toast_area());
+                            self.effects_manager.add_effect(fx);
                         }
                     }
                 },
@@ -375,7 +402,12 @@ impl App {
             if !self.in_editor
                 && (should_draw
                     || matches!(action, Some(Action::ForceRender))
-                    || should_draw_error_popup)
+                    || should_draw_error_popup
+                    || self.effects_manager.is_running()
+                    || self
+                        .toast_engine
+                        .as_ref()
+                        .is_some_and(|engine| engine.has_toast()))
             {
                 if full_redraw && let Err(err) = terminal.clear() {
                     self.capture_error(err);
@@ -507,6 +539,8 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<impl std::io::Write>>,
     ) -> Result<(), AppError> {
         terminal.draw(|f| {
+            let elapsed = self.last_frame.elapsed();
+            self.last_frame = time::Instant::now();
             let area = f.area();
             let fullscreen = self.current_screen == MainScreen::DetailsFullscreen;
             let layout = if fullscreen {
@@ -561,7 +595,8 @@ impl App {
             }
             if let Some(ref mut toast_engine) = self.toast_engine {
                 toast_engine.set_area(area);
-                toast_engine.render_ref(area, f.buffer_mut());
+                toast_engine.render_ref(area, buf);
+                self.effects_manager.process_effects(elapsed, buf, area);
             }
         })?;
         Ok(())
