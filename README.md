@@ -99,6 +99,9 @@ See [KEYBINDINGS.md](./KEYBINDS.md) for a list of keybindings used in the applic
 
 ### Token Security
 
+> [!NOTE]
+> To persist the token across reboots (i.e. to store it on disk) on Linux, build with the `persist-token` feature flag. This requires for `dbus` to be present and `DBUS_SESSION_BUS_ADDRESS` to be set.
+
 `gitv` uses the `keyring` crate to securely store your GitHub token in your system's credential store. This means that your token is encrypted and protected by your operating system's security features, providing a secure way to manage your authentication credentials.
 
 ### Contributing

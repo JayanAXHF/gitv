@@ -13,11 +13,11 @@ keywords = ["tui", "cli", "github", "prodcutivity", "ratatui"]
 categories = ["command-line-utilities", "command-line-interface"]
 
 [workspace]
-members = [
-	"crates/hyperrat"
-,
-	"crates/ratatui-toaster"
-]
+members = ["crates/hyperrat", "crates/ratatui-toaster"]
+
+[features]
+default = ["keyring/linux-native"]
+persist-token = ["keyring/sync-secret-service"]
 
 [dependencies]
 anyhow = "1.0"
@@ -30,7 +30,7 @@ edit = "0.1.5"
 futures = "0.3.31"
 hyperrat = { path = "crates/hyperrat", version = "0.1.1" }
 inquire = "0.9.3"
-keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native"] }
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
 octocrab = "0.49.5"
 pulldown-cmark = "0.13.0"
 regex = "1.11.1"
