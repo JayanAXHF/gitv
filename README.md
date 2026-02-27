@@ -164,7 +164,7 @@ cargo install --path .
     sources = import ./npins;
   in {
     environment.systemPackages = [
-      (import sources.gitv)
+      (import sources.gitv {})
     ];
   }
   ```
