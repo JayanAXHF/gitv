@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.3.2...gitv-tui-v0.3.3) - 2026-02-28
+
+### Added
+
+- *(nix)* add devshell, package derivation, flake
+
+### Fixed
+
+- fix non-flake install instructions
+
+### Other
+
+- update usage in readme
+- add install instructions for homebrew
+
 ## [0.3.2](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.3.1...gitv-tui-v0.3.2) - 2026-02-26
 
 ### Added
