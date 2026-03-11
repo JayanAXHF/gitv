@@ -7,8 +7,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout as RtLayout, Rect},
     prelude::Widget,
     style::Style,
+    symbols::merge::MergeStrategy,
     text::{Line, Span, Text},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 use ratatui_macros::line;
 
@@ -115,9 +116,10 @@ impl IssuePreview {
 
     pub fn render(&mut self, area: Layout, buf: &mut Buffer) {
         self.area = area.issue_preview;
-        let block = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title("Issue Info");
+        let block = Block::default()
+            .borders(Borders::LEFT | Borders::TOP)
+            .border_style(Style::new().dim())
+            .merge_borders(MergeStrategy::Exact);
 
         let inner = block.inner(area.issue_preview);
         block.render(area.issue_preview, buf);
@@ -169,15 +171,6 @@ impl IssuePreview {
             _ => Style::new().cyan(),
         };
 
-        let kind = if seed.is_pull_request {
-            "Pull Request"
-        } else {
-            "Issue"
-        };
-        lines.push(Line::from(vec![
-            Span::styled("Type: ", label_style),
-            Span::styled(kind, Style::new().cyan()),
-        ]));
         lines.push(Line::from(vec![
             Span::styled("State: ", label_style),
             Span::styled(format!("{:?}", seed.state), state_style),
