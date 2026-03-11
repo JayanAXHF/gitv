@@ -686,10 +686,7 @@ impl<'a> IssueList<'a> {
             area.main_content = split[0];
             assign_input_area = split[1];
         }
-        let mut block = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(get_border_style(&self.list_state))
-            .padding(Padding::horizontal(3));
+        let mut block = Block::default().padding(Padding::horizontal(3));
         if self.state != LoadingState::Loading {
             let mut title = format!("[{}] Issues", self.index);
             if let Some(err) = &self.close_error {
@@ -1163,9 +1160,27 @@ impl Component for IssueList<'_> {
                                 let _ = tx.send(crate::ui::Action::FinishedLoading).await;
                             });
                         }
-                        let (issue_number, labels, preview_seed) = {
+                        let body_owned: Option<Arc<str>> = {
                             let pool = self.issue_pool.read().expect("issue pool lock poisoned");
                             let issue = pool.get_issue(self.issues[selected].0);
+                            issue
+                                .body
+                                .map(|body_id| Arc::<str>::from(pool.resolve_str(body_id)))
+                        };
+                        if let Some(body) = body_owned {
+                            self.action_tx
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    AppError::Other(anyhow!(
+                                        "issue list action channel unavailable"
+                                    ))
+                                })?
+                                .send(crate::ui::Action::ChangeIssueBodyPreview(body))
+                                .await?;
+                        }
+                        let (issue_number, labels, preview_seed) = {
+                            let pool = self.issue_pool.read().expect("issue pool lock poisoned");
+                            let issue = { pool.get_issue(self.issues[selected].0) };
                             (
                                 issue.number,
                                 issue.labels.clone(),

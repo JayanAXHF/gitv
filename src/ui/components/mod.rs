@@ -8,6 +8,7 @@ use ratatui::crossterm::event::Event;
 
 pub mod help;
 pub mod issue_conversation;
+pub mod issue_convo_preview;
 pub mod issue_create;
 pub mod issue_detail;
 pub mod issue_list;

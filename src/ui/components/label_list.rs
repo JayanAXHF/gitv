@@ -19,7 +19,8 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout as TuiLayout, Rect},
     style::{Color, Style, Stylize},
-    widgets::{Block, Clear, ListItem, Paragraph, StatefulWidget, Widget},
+    symbols::merge::MergeStrategy,
+    widgets::{Block, Borders, Clear, ListItem, Paragraph, StatefulWidget, Widget},
 };
 use ratatui_macros::{line, span};
 use regex::RegexBuilder;
@@ -219,8 +220,9 @@ impl LabelList {
         } else {
             format!("[{}] Labels (a:add d:remove)", self.index)
         };
-        let block = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
+        let block = Block::default()
+            .borders(Borders::LEFT | Borders::BOTTOM)
+            .merge_borders(MergeStrategy::Exact)
             .title(title)
             .border_style(get_border_style(&self.state));
         let list = rat_widget::list::List::<RowSelection>::new(
@@ -1262,4 +1264,3 @@ impl HasFocus for LabelList {
         self.state.focus()
     }
 }
-
