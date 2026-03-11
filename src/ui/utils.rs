@@ -12,7 +12,7 @@ pub fn get_loader_area(area: Rect) -> Rect {
 
 #[inline(always)]
 pub fn get_border_style(state: &impl HasFocus) -> Style {
-    let default_border_style = Style::default();
+    let default_border_style = Style::default().dim();
     let focused_border_style = Style::default().yellow();
     if state.is_focused() {
         focused_border_style
