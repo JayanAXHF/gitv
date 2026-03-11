@@ -214,7 +214,7 @@ fn make_issue(
         .choose(rng)
         .map(|author| author.author_id)
         .expect("author fixture list should not be empty");
-    let state = if idx % 5 == 0 {
+    let state = if idx.is_multiple_of(5) {
         IssueState::Closed
     } else {
         IssueState::Open
@@ -223,7 +223,7 @@ fn make_issue(
         "{} #{issue_number}",
         Sentence(3..6).fake_with_rng::<String, _>(rng)
     );
-    let shared_fragment = if idx % 2 == 0 {
+    let shared_fragment = if idx.is_multiple_of(2) {
         issue_body_fixture(1)
     } else {
         markdown_fixture(1)
@@ -239,13 +239,13 @@ fn make_issue(
     let created_at_short = format_timestamp(created_ts, false);
     let created_at_full = format_timestamp(created_ts, true);
     let updated_at_short = format_timestamp(created_ts + 1_800, false);
-    let milestone = (idx % 3 == 0).then(|| {
+    let milestone = (idx.is_multiple_of(3)).then(|| {
         let milestone = milestones
             .choose(rng)
             .expect("milestone fixture list should not be empty");
         pool.intern_str(milestone)
     });
-    let assignee_count = 1 + (idx % authors.len().min(3).max(1));
+    let assignee_count = 1 + (idx % authors.len().clamp(1, 3));
     let assignees = authors
         .iter()
         .cycle()
@@ -253,7 +253,7 @@ fn make_issue(
         .take(assignee_count)
         .map(|author| author.author_id)
         .collect();
-    let is_pull_request = idx % 4 == 0;
+    let is_pull_request = idx.is_multiple_of(4);
     let pull_request_url = if is_pull_request {
         let url = format!("https://github.com/example/repo/pull/{issue_number}");
         Some(pool.intern_str(&url))
