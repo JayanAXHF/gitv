@@ -20,11 +20,11 @@ use rat_widget::{
 use ratatui::{
     buffer::Buffer,
     layout::{Rect, Spacing},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{self, Block, Borders, ListItem, Padding, StatefulWidget, Widget},
 };
-use ratatui_macros::{horizontal, line, span, vertical};
+use ratatui_macros::{horizontal, line, vertical};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, OnceLock, RwLock},
@@ -367,7 +367,7 @@ impl IssueConversation {
             self.current.as_ref().map(|s| s.number).unwrap_or_default()
         ));
         let title = title.trim();
-        let wrapped_title = wrap(&title, area.main_content.width.saturating_sub(2) as usize);
+        let wrapped_title = wrap(title, area.main_content.width.saturating_sub(2) as usize);
         let title_para_height = wrapped_title.len() as u16 + 1;
         let title_para = Text::from_iter(wrapped_title);
 

@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 use crate::{
     app::GITHUB_CLIENT,
     bookmarks::Bookmarks,
@@ -1162,7 +1163,7 @@ impl Component for IssueList<'_> {
                         }
                         let (issue_number, labels, preview_seed) = {
                             let pool = self.issue_pool.read().expect("issue pool lock poisoned");
-                            let issue = pool.get_issue(self.issues[selected].0);
+                            let issue = { pool.get_issue(self.issues[selected].0) };
                             if let Some(body_id) = issue.body {
                                 let body = pool.resolve_str(body_id);
                                 self.action_tx

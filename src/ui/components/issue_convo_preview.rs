@@ -9,7 +9,7 @@ use ratatui::{
     layout::Rect,
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use textwrap::wrap;
 
 use crate::{
@@ -17,7 +17,6 @@ use crate::{
     ui::{
         Action,
         components::{Component, help::HelpElementKind, issue_conversation::render_markdown},
-        issue_data::{IssueId, UiIssuePool},
         layout::Layout,
         utils::get_border_style,
     },
@@ -40,11 +39,11 @@ pub const HELP: &[HelpElementKind] = &[
     crate::help_keybind!("Esc", "exit fullscreen / return to issue list"),
 ];
 
+#[derive(Default)]
 pub struct IssueConvoPreview {
     action_tx: Option<tokio::sync::mpsc::Sender<Action>>,
     body: Option<Arc<str>>,
     area: Rect,
-    current: Option<IssueId>,
     paragraph_state: ParagraphState,
     index: usize,
     focus: FocusFlag,
@@ -52,15 +51,7 @@ pub struct IssueConvoPreview {
 
 impl IssueConvoPreview {
     pub fn new() -> Self {
-        Self {
-            action_tx: None,
-            current: None,
-            body: None,
-            index: 0,
-            focus: FocusFlag::default(),
-            area: Rect::default(),
-            paragraph_state: ParagraphState::default(),
-        }
+        Self::default()
     }
 
     pub fn render(&mut self, area: Layout, buf: &mut Buffer) {
@@ -81,7 +72,7 @@ impl IssueConvoPreview {
             return;
         };
         let body_str = wrap(
-            &body,
+            body,
             area.mini_convo_preview.width.saturating_sub(2) as usize,
         )
         .join("\n");
