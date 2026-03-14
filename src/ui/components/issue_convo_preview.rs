@@ -11,7 +11,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{
-        Block, Borders, List as TuiList, ListItem, ListState as TuiListState, Padding,
+        self, Block, Borders, List as TuiList, ListItem, ListState as TuiListState, Padding,
         StatefulWidget, Widget,
     },
 };
@@ -82,7 +82,18 @@ impl IssueConvoPreview {
         match self.screen {
             MainScreen::List => self.render_body_preview(area.mini_convo_preview, buf),
             MainScreen::Details => self.render_issue_list_preview(area.mini_convo_preview, buf),
-            MainScreen::DetailsFullscreen | MainScreen::CreateIssue => {}
+            MainScreen::CreateIssue => {
+                let para = widgets::Paragraph::new("No preview available in fullscreen mode")
+                    .block(
+                        Block::default()
+                            .borders(Borders::LEFT | Borders::BOTTOM)
+                            .title(format!("[{}] Issue Conversation", self.index))
+                            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                            .border_style(get_border_style(&self.paragraph_state)),
+                    );
+                para.render(area.mini_convo_preview, buf);
+            }
+            MainScreen::DetailsFullscreen => {}
         }
     }
 
