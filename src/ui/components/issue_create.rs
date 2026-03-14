@@ -4,6 +4,7 @@ use rat_cursor::HasScreenCursor;
 use rat_widget::{
     event::{HandleEvent, TextOutcome, ct_event},
     focus::{FocusBuilder, FocusFlag, HasFocus, Navigation},
+    line_number::{LineNumberState, LineNumbers},
     paragraph::{Paragraph, ParagraphState},
     text_input::{TextInput, TextInputState},
     textarea::{TextArea, TextAreaState, TextWrap},
@@ -12,9 +13,9 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, StatefulWidget},
+    widgets::{Block, Borders, Padding, StatefulWidget},
 };
-use ratatui_macros::vertical;
+use ratatui_macros::{horizontal, vertical};
 use throbber_widgets_tui::{BRAILLE_SIX_DOUBLE, Throbber, ThrobberState, WhichUse};
 
 use crate::{
@@ -77,6 +78,7 @@ pub struct IssueCreate {
     labels_state: TextInputState,
     assignees_state: TextInputState,
     body_state: TextAreaState,
+    line_number_state: LineNumberState,
     preview_state: ParagraphState,
     mode: InputMode,
     creating: bool,
@@ -105,6 +107,7 @@ impl IssueCreate {
             labels_state: TextInputState::default(),
             assignees_state: TextInputState::default(),
             body_state: TextAreaState::new(),
+            line_number_state: LineNumberState::default(),
             preview_state: ParagraphState::default(),
             mode: InputMode::default(),
             creating: false,
@@ -300,19 +303,34 @@ impl IssueCreate {
 
         match self.mode {
             InputMode::Input => {
-                let mut title = "Body (Ctrl+P: Preview | Ctrl+Enter: Create)".to_string();
-                if let Some(err) = &self.error {
-                    title.push_str(" | ");
-                    title.push_str(err);
-                }
-                let mut block = Block::bordered()
-                    .border_type(ratatui::widgets::BorderType::Rounded)
+                let [line_numbers_area, text_area] = horizontal![==self.body_state.len_lines().checked_ilog10().unwrap_or(0) as u16 + 2, *=1]
+                    .areas(body_area);
+                let line_numbers = LineNumbers::new()
+                    .with_textarea(&self.body_state)
+                    .block(
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                            .border_style(get_border_style(&self.body_state)),
+                    )
+                    .style(Style::default().dim());
+                line_numbers.render(line_numbers_area, buf, &mut self.line_number_state);
+
+                let input_title = if let Some(err) = &self.error {
+                    format!("Body (Ctrl+Enter to create) | {err}")
+                } else {
+                    "Body (Ctrl+Enter to create)".to_string()
+                };
+                let mut block = Block::default()
+                    .borders(Borders::TOP)
+                    .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                    .padding(Padding::horizontal(1))
                     .border_style(get_border_style(&self.body_state));
                 if !self.creating {
-                    block = block.title(title);
+                    block = block.title(input_title);
                 }
                 let textarea = TextArea::new().block(block).text_wrap(TextWrap::Word(4));
-                textarea.render(body_area, buf, &mut self.body_state);
+                textarea.render(text_area, buf, &mut self.body_state);
             }
             InputMode::Preview => {
                 let mut title = "Preview (Ctrl+P: Edit | Ctrl+Enter: Create)".to_string();
