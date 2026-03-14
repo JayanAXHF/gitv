@@ -5,9 +5,9 @@ use ratatui::widgets::Widget;
 use ratatui_macros::{line, span};
 use std::sync::atomic::Ordering;
 
-use crate::ui::components::issue_list::LOADED_ISSUE_COUNT;
 use crate::ui::components::DumbComponent;
-use crate::ui::{layout::Layout, AppState};
+use crate::ui::components::issue_list::LOADED_ISSUE_COUNT;
+use crate::ui::{AppState, layout::Layout};
 
 pub struct StatusBar {
     repo_label: String,
@@ -41,7 +41,7 @@ impl StatusBar {
             .end(span!(count_text).style(Style::new().black().on_blue()), "")
             .end(
                 line![
-                    span!("q/<C-q>/<C-c").magenta(),
+                    span!("q/<C-q>/<C-c>").magenta(),
                     " ",
                     span!(" QUIT ").black().on_magenta().bold()
                 ],

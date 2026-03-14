@@ -18,6 +18,7 @@ use crate::{
         Component, DumbComponent,
         help::HelpElementKind,
         issue_conversation::IssueConversation,
+        issue_convo_preview::IssueConvoPreview,
         issue_create::IssueCreate,
         issue_detail::IssuePreview,
         issue_list::{IssueList, MainScreen},
@@ -190,6 +191,7 @@ impl App {
         let issue_pool = Arc::new(RwLock::new(UiIssuePool::default()));
         let mut issue_conversation = IssueConversation::new(state.clone(), issue_pool.clone());
         let mut issue_create = IssueCreate::new(state.clone(), issue_pool.clone());
+        let mut issue_convo_preview = IssueConvoPreview::new(issue_pool.clone());
         let bookmarks = Arc::new(RwLock::new(read_bookmarks()));
         let issue_handler = GITHUB_CLIENT
             .get()
@@ -211,6 +213,7 @@ impl App {
              3 -> issue_conversation,
              5 -> issue_create,
              4 -> label_list,
+             6 -> issue_convo_preview,
              1 -> text_search, // this needs to be the last one
         )?;
         let effects_manager = EffectManager::default();
@@ -665,6 +668,11 @@ pub enum Action {
     },
     EnterIssueDetails {
         seed: IssueConversationSeed,
+    },
+    ChangeIssueBodyPreview(Arc<str>),
+    IssueListPreviewUpdated {
+        issue_ids: Vec<IssueId>,
+        selected_number: u64,
     },
     IssueCommentsLoaded {
         number: u64,

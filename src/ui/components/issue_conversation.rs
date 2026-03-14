@@ -12,18 +12,19 @@ use rat_cursor::HasScreenCursor;
 use rat_widget::{
     event::{HandleEvent, Outcome, TextOutcome, ct_event},
     focus::{FocusBuilder, FocusFlag, HasFocus, Navigation},
+    line_number::{LineNumberState, LineNumbers},
     list::{ListState, selection::RowSelection},
     paragraph::{Paragraph, ParagraphState},
     textarea::{TextArea, TextAreaState, TextWrap},
 };
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
-    style::{Color, Modifier, Style, Stylize},
+    layout::{Rect, Spacing},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{self, Block, ListItem, StatefulWidget, Widget},
+    widgets::{self, Block, Borders, ListItem, Padding, StatefulWidget, Widget},
 };
-use ratatui_macros::{horizontal, line, span, vertical};
+use ratatui_macros::{horizontal, line, vertical};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, OnceLock, RwLock},
@@ -170,7 +171,7 @@ pub struct TimelineEventView {
 }
 
 impl TimelineEventView {
-    fn from_api(event: TimelineEvent, fallback_id: u64) -> Option<Self> {
+    pub(crate) fn from_api(event: TimelineEvent, fallback_id: u64) -> Option<Self> {
         if matches!(
             event.event,
             IssueEvent::Commented | IssueEvent::LineCommented | IssueEvent::CommentDeleted
@@ -210,6 +211,7 @@ impl TimelineEventView {
 
 pub struct IssueConversation {
     title: Option<Arc<str>>,
+    ln_state: LineNumberState,
     action_tx: Option<tokio::sync::mpsc::Sender<Action>>,
     current: Option<IssueConversationSeed>,
     cache_number: Option<u64>,
@@ -264,13 +266,13 @@ enum MessageKey {
 }
 
 #[derive(Debug, Clone, Default)]
-struct MarkdownRender {
-    lines: Vec<Line<'static>>,
-    links: Vec<RenderedLink>,
+pub(crate) struct MarkdownRender {
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) links: Vec<RenderedLink>,
 }
 
 #[derive(Debug, Clone)]
-struct RenderedLink {
+pub(crate) struct RenderedLink {
     line: usize,
     col: usize,
     label: String,
@@ -314,6 +316,7 @@ impl IssueConversation {
             action_tx: None,
             current: None,
             cache_number: None,
+            ln_state: LineNumberState::default(),
             cache_comments: Vec::new(),
             timeline_cache_number: None,
             cache_timeline: Vec::new(),
@@ -358,48 +361,40 @@ impl IssueConversation {
             return;
         }
         self.area = area.main_content;
-        let title = self.title.clone().unwrap_or_default();
-        let wrapped_title = wrap(&title, area.main_content.width.saturating_sub(2) as usize);
-        let title_para_height = wrapped_title.len() as u16 + 2;
-        let last_item = wrapped_title.last();
-        let last_line = last_item
-            .as_ref()
-            .map(|l| {
-                line![
-                    l.to_string(),
-                    span!(
-                        " #{}",
-                        self.current.as_ref().map(|s| s.number).unwrap_or_default()
-                    )
-                    .dim()
-                ]
-            })
-            .unwrap_or_else(|| Line::from(""));
-        let wrapped_title_len = wrapped_title.len() as u16;
-        let title_para = Text::from_iter(
-            wrapped_title
-                .into_iter()
-                .take(wrapped_title_len as usize - 1)
-                .map(Line::from)
-                .chain(std::iter::once(last_line)),
-        );
+        let mut title = self.title.clone().unwrap_or_default().to_string();
+        title.push_str(&format!(
+            " #{}",
+            self.current.as_ref().map(|s| s.number).unwrap_or_default()
+        ));
+        let title = title.trim();
+        let wrapped_title = wrap(title, area.main_content.width.saturating_sub(2) as usize);
+        let title_para_height = wrapped_title.len() as u16 + 1;
+        let title_para = Text::from_iter(wrapped_title);
 
         let areas = vertical![==title_para_height, *=1, ==5].split(area.main_content);
         let title_area = areas[0];
         let content_area = areas[1];
         let input_area = areas[2];
-        let content_split = horizontal![*=1, *=1].split(content_area);
+        let content_split = horizontal![*=1, *=1]
+            .spacing(Spacing::Overlap(1))
+            .split(content_area);
         let list_area = content_split[0];
         let body_area = content_split[1];
         let items = self.build_items(list_area, body_area);
 
         let title_widget = widgets::Paragraph::new(title_para)
-            .block(Block::bordered().border_type(ratatui::widgets::BorderType::Rounded))
+            .block(
+                Block::default()
+                    .padding(Padding::horizontal(1))
+                    .borders(Borders::BOTTOM)
+                    .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact),
+            )
             .style(Style::default().add_modifier(Modifier::BOLD));
         title_widget.render(title_area, buf);
 
-        let mut list_block = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
+        let mut list_block = Block::default()
+            .borders(Borders::RIGHT)
+            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
             .border_style(get_border_style(&self.list_state));
 
         if !self.is_loading_current() {
@@ -449,13 +444,26 @@ impl IssueConversation {
 
         match self.textbox_state {
             InputState::Input => {
+                let [line_numbers, input_area] = horizontal![==self.input_state.len_lines().checked_ilog10().unwrap_or(0) as u16 + 2, *=1].areas(input_area);
+                let ln_block = Block::default()
+                    .borders(Borders::TOP)
+                    .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                    .border_style(get_border_style(&self.input_state));
+                let ln = LineNumbers::new()
+                    .with_textarea(&self.input_state)
+                    .block(ln_block)
+                    .style(Style::default().dim());
+                ln.render(line_numbers, buf, &mut self.ln_state);
+
                 let input_title = if let Some(err) = &self.post_error {
                     format!("Comment (Ctrl+Enter to send) | {err}")
                 } else {
                     "Comment (Ctrl+Enter to send)".to_string()
                 };
-                let mut input_block = Block::bordered()
-                    .border_type(ratatui::widgets::BorderType::Rounded)
+                let mut input_block = Block::default()
+                    .borders(Borders::TOP)
+                    .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                    .padding(Padding::horizontal(1))
                     .border_style(get_border_style(&self.input_state));
                 if !self.posting {
                     input_block = input_block.title(input_title);
@@ -470,8 +478,10 @@ impl IssueConversation {
                     render_markdown_lines(&self.input_state.text(), self.markdown_width, 2);
                 let para = Paragraph::new(rendered)
                     .block(
-                        Block::bordered()
-                            .border_type(ratatui::widgets::BorderType::Rounded)
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                            .padding(Padding::horizontal(1))
                             .border_style(get_border_style(&self.paragraph_state))
                             .title("Preview"),
                     )
@@ -636,8 +646,9 @@ impl IssueConversation {
 
         let body = Paragraph::new(body_lines)
             .block(
-                Block::bordered()
-                    .border_type(ratatui::widgets::BorderType::Rounded)
+                Block::default()
+                    .borders(Borders::LEFT)
+                    .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
                     .border_style(get_border_style(&self.body_paragraph_state))
                     .title(if self.screen == MainScreen::DetailsFullscreen {
                         "Message Body (PageUp/PageDown/Home/End | f/Esc: exit fullscreen)"
@@ -2441,7 +2452,7 @@ pub(crate) fn render_markdown_lines(text: &str, width: usize, indent: usize) -> 
     render_markdown(text, width, indent).lines
 }
 
-fn render_markdown(text: &str, width: usize, indent: usize) -> MarkdownRender {
+pub(crate) fn render_markdown(text: &str, width: usize, indent: usize) -> MarkdownRender {
     let mut renderer = MarkdownRenderer::new(width, indent);
     let options = Options::ENABLE_GFM
         | Options::ENABLE_STRIKETHROUGH
@@ -2486,9 +2497,54 @@ struct MarkdownRenderer {
     in_code_block: bool,
     code_block_lang: Option<String>,
     code_block_buf: String,
-    list_prefix: Option<String>,
+    item_prefix: Option<ListPrefix>,
     pending_space: bool,
     active_link_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ListPrefix {
+    first_line: String,
+    continuation: String,
+    first_line_pending: bool,
+}
+
+impl ListPrefix {
+    fn bullet() -> Self {
+        Self::new("• ".to_string())
+    }
+
+    fn task(checked: bool) -> Self {
+        let prefix = if checked { "[x] " } else { "[ ] " };
+        Self::new(prefix.to_string())
+    }
+
+    fn new(first_line: String) -> Self {
+        let continuation = " ".repeat(display_width(&first_line));
+        Self {
+            first_line,
+            continuation,
+            first_line_pending: true,
+        }
+    }
+
+    fn current_text(&self) -> &str {
+        if self.first_line_pending {
+            &self.first_line
+        } else {
+            &self.continuation
+        }
+    }
+
+    fn current_width(&self) -> usize {
+        display_width(self.current_text())
+    }
+
+    fn take_for_line(&mut self) -> String {
+        let prefix = self.current_text().to_string();
+        self.first_line_pending = false;
+        prefix
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2553,7 +2609,7 @@ impl MarkdownRenderer {
             in_code_block: false,
             code_block_lang: None,
             code_block_buf: String::new(),
-            list_prefix: None,
+            item_prefix: None,
             pending_space: false,
             active_link_url: None,
         }
@@ -2593,7 +2649,7 @@ impl MarkdownRenderer {
             }
             Tag::Item => {
                 self.flush_line();
-                self.list_prefix = Some("• ".to_string());
+                self.item_prefix = Some(ListPrefix::bullet());
             }
             _ => {}
         }
@@ -2633,7 +2689,7 @@ impl MarkdownRenderer {
             }
             TagEnd::Item => {
                 self.flush_line();
-                self.list_prefix = None;
+                self.item_prefix = None;
             }
             TagEnd::Paragraph => {
                 self.flush_line();
@@ -2705,8 +2761,8 @@ impl MarkdownRenderer {
 
     fn task_list_marker(&mut self, checked: bool) {
         self.ensure_admonition_header();
-        let marker = if checked { "[x] " } else { "[ ] " };
-        self.push_text(marker, self.current_style);
+        self.item_prefix = Some(ListPrefix::task(checked));
+        self.pending_space = false;
     }
 
     fn rule(&mut self) {
@@ -2912,9 +2968,10 @@ impl MarkdownRenderer {
                 .unwrap_or_else(|| Style::new().fg(Color::DarkGray));
             self.current_line.push(Span::styled("│ ", border_style));
         }
-        if let Some(prefix) = &self.list_prefix {
-            self.current_width += display_width(prefix);
-            self.current_line.push(Span::raw(prefix.clone()));
+        if let Some(prefix) = self.item_prefix.as_mut() {
+            let prefix = prefix.take_for_line();
+            self.current_width += display_width(&prefix);
+            self.current_line.push(Span::raw(prefix));
         }
     }
 
@@ -2923,8 +2980,8 @@ impl MarkdownRenderer {
         if self.in_block_quote {
             width += 2;
         }
-        if let Some(prefix) = &self.list_prefix {
-            width += display_width(prefix);
+        if let Some(prefix) = &self.item_prefix {
+            width += prefix.current_width();
         }
         width
     }
@@ -3079,6 +3136,19 @@ mod tests {
             .collect()
     }
 
+    fn all_line_text(rendered: &super::MarkdownRender) -> Vec<String> {
+        rendered
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect()
+    }
+
     #[test]
     fn extracts_link_segments_with_urls() {
         let rendered = render_markdown("Go to [ratatui docs](https://github.com/ratatui/).", 80, 0);
@@ -3109,6 +3179,37 @@ mod tests {
                 .links
                 .iter()
                 .all(|link| !link.label.starts_with(' ') && !link.label.ends_with(' '))
+        );
+    }
+
+    #[test]
+    fn renders_unchecked_checklist_without_bullet_prefix() {
+        let rendered = render_markdown("- [ ] todo", 80, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[ ] todo"]);
+    }
+
+    #[test]
+    fn renders_checked_checklist_without_bullet_prefix() {
+        let rendered = render_markdown("- [x] done", 80, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[x] done"]);
+    }
+
+    #[test]
+    fn wraps_checklist_items_with_aligned_continuation() {
+        let rendered = render_markdown("- [ ] hello world", 10, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[ ] hello", "    world"]);
+    }
+
+    #[test]
+    fn keeps_bullets_for_non_task_list_items() {
+        let rendered = render_markdown("- bullet\n- [x] done\n- [ ] todo", 80, 0);
+
+        assert_eq!(
+            all_line_text(&rendered),
+            vec!["• bullet", "[x] done", "[ ] todo"]
         );
     }
 }
