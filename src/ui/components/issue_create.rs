@@ -349,7 +349,9 @@ impl IssueCreate {
                 let preview = Paragraph::new(lines)
                     .block(
                         Block::bordered()
-                            .border_type(ratatui::widgets::BorderType::Rounded)
+                            .borders(Borders::TOP)
+                            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                            .padding(Padding::horizontal(1))
                             .border_style(get_border_style(&self.preview_state))
                             .title(title),
                     )

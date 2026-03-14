@@ -478,8 +478,10 @@ impl IssueConversation {
                     render_markdown_lines(&self.input_state.text(), self.markdown_width, 2);
                 let para = Paragraph::new(rendered)
                     .block(
-                        Block::bordered()
-                            .border_type(ratatui::widgets::BorderType::Rounded)
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
+                            .padding(Padding::horizontal(1))
                             .border_style(get_border_style(&self.paragraph_state))
                             .title("Preview"),
                     )

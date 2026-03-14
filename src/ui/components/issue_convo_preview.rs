@@ -117,7 +117,7 @@ impl IssueConvoPreview {
         let rendered = render_markdown(&body_str, area.width.saturating_sub(2).into(), 2).lines;
         let para = rat_widget::paragraph::Paragraph::new(rendered).block(
             Block::default()
-                .borders(Borders::LEFT | Borders::BOTTOM)
+                .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
                 .title(format!("[{}] Issue Body", self.index))
                 .merge_borders(ratatui::symbols::merge::MergeStrategy::Exact)
                 .border_style(get_border_style(&self.paragraph_state)),
