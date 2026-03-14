@@ -2497,9 +2497,54 @@ struct MarkdownRenderer {
     in_code_block: bool,
     code_block_lang: Option<String>,
     code_block_buf: String,
-    list_prefix: Option<String>,
+    item_prefix: Option<ListPrefix>,
     pending_space: bool,
     active_link_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ListPrefix {
+    first_line: String,
+    continuation: String,
+    first_line_pending: bool,
+}
+
+impl ListPrefix {
+    fn bullet() -> Self {
+        Self::new("• ".to_string())
+    }
+
+    fn task(checked: bool) -> Self {
+        let prefix = if checked { "[x] " } else { "[ ] " };
+        Self::new(prefix.to_string())
+    }
+
+    fn new(first_line: String) -> Self {
+        let continuation = " ".repeat(display_width(&first_line));
+        Self {
+            first_line,
+            continuation,
+            first_line_pending: true,
+        }
+    }
+
+    fn current_text(&self) -> &str {
+        if self.first_line_pending {
+            &self.first_line
+        } else {
+            &self.continuation
+        }
+    }
+
+    fn current_width(&self) -> usize {
+        display_width(self.current_text())
+    }
+
+    fn take_for_line(&mut self) -> String {
+        let prefix = self.current_text().to_string();
+        self.first_line_pending = false;
+        prefix
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2564,7 +2609,7 @@ impl MarkdownRenderer {
             in_code_block: false,
             code_block_lang: None,
             code_block_buf: String::new(),
-            list_prefix: None,
+            item_prefix: None,
             pending_space: false,
             active_link_url: None,
         }
@@ -2604,7 +2649,7 @@ impl MarkdownRenderer {
             }
             Tag::Item => {
                 self.flush_line();
-                self.list_prefix = Some("• ".to_string());
+                self.item_prefix = Some(ListPrefix::bullet());
             }
             _ => {}
         }
@@ -2644,7 +2689,7 @@ impl MarkdownRenderer {
             }
             TagEnd::Item => {
                 self.flush_line();
-                self.list_prefix = None;
+                self.item_prefix = None;
             }
             TagEnd::Paragraph => {
                 self.flush_line();
@@ -2716,8 +2761,8 @@ impl MarkdownRenderer {
 
     fn task_list_marker(&mut self, checked: bool) {
         self.ensure_admonition_header();
-        let marker = if checked { "[x] " } else { "[ ] " };
-        self.push_text(marker, self.current_style);
+        self.item_prefix = Some(ListPrefix::task(checked));
+        self.pending_space = false;
     }
 
     fn rule(&mut self) {
@@ -2923,9 +2968,10 @@ impl MarkdownRenderer {
                 .unwrap_or_else(|| Style::new().fg(Color::DarkGray));
             self.current_line.push(Span::styled("│ ", border_style));
         }
-        if let Some(prefix) = &self.list_prefix {
-            self.current_width += display_width(prefix);
-            self.current_line.push(Span::raw(prefix.clone()));
+        if let Some(prefix) = self.item_prefix.as_mut() {
+            let prefix = prefix.take_for_line();
+            self.current_width += display_width(&prefix);
+            self.current_line.push(Span::raw(prefix));
         }
     }
 
@@ -2934,8 +2980,8 @@ impl MarkdownRenderer {
         if self.in_block_quote {
             width += 2;
         }
-        if let Some(prefix) = &self.list_prefix {
-            width += display_width(prefix);
+        if let Some(prefix) = &self.item_prefix {
+            width += prefix.current_width();
         }
         width
     }
@@ -3090,6 +3136,19 @@ mod tests {
             .collect()
     }
 
+    fn all_line_text(rendered: &super::MarkdownRender) -> Vec<String> {
+        rendered
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect()
+    }
+
     #[test]
     fn extracts_link_segments_with_urls() {
         let rendered = render_markdown("Go to [ratatui docs](https://github.com/ratatui/).", 80, 0);
@@ -3120,6 +3179,37 @@ mod tests {
                 .links
                 .iter()
                 .all(|link| !link.label.starts_with(' ') && !link.label.ends_with(' '))
+        );
+    }
+
+    #[test]
+    fn renders_unchecked_checklist_without_bullet_prefix() {
+        let rendered = render_markdown("- [ ] todo", 80, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[ ] todo"]);
+    }
+
+    #[test]
+    fn renders_checked_checklist_without_bullet_prefix() {
+        let rendered = render_markdown("- [x] done", 80, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[x] done"]);
+    }
+
+    #[test]
+    fn wraps_checklist_items_with_aligned_continuation() {
+        let rendered = render_markdown("- [ ] hello world", 10, 0);
+
+        assert_eq!(all_line_text(&rendered), vec!["[ ] hello", "    world"]);
+    }
+
+    #[test]
+    fn keeps_bullets_for_non_task_list_items() {
+        let rendered = render_markdown("- bullet\n- [x] done\n- [ ] todo", 80, 0);
+
+        assert_eq!(
+            all_line_text(&rendered),
+            vec!["• bullet", "[x] done", "[ ] todo"]
         );
     }
 }
