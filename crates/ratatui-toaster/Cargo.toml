@@ -27,5 +27,5 @@ path = "examples/simple.rs"
 anyhow = "1.0.102"
 tokio = { version = "1.38", features = ["rt-multi-thread", "sync", "time", "macros"] }
 ratatui = { version = "0.30.0" }
-tachyonfx = { version = "0.24.0", default-features = false, features = ["std", "std-duration"] }
+tachyonfx = { version = "0.25.0", default-features = false, features = ["std", "std-duration"] }
 tokio-util = "0.7.18"
