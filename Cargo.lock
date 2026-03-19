@@ -4773,9 +4773,9 @@ dependencies = [
 
 [[package]]
 name = "tachyonfx"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8b44aa47439cbd317199cbff5ec99ada4737c10f5aeb95cd92577f4a81640e"
+checksum = "c144c687e9f3628c06add1b6db585a68d3cd285a9d7213b9bca836771e337592"
 dependencies = [
  "bon",
  "compact_str",
