@@ -1464,7 +1464,7 @@ dependencies = [
 
 [[package]]
 name = "gitv-tui"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4010,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "ratatui-toaster"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "ratatui",
