@@ -1,7 +1,7 @@
 [package]
 name = "ratatui-toaster"
 description = "An extremely lightweight toast engine for ratatui"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["JayanAXHF <sunil.chdry@gmail.com>"]
 license = "Unlicense OR MIT"
