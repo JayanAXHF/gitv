@@ -1,8 +1,9 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use gitv_tui::bench_support::{
     build_issue_body_preview_for_bench, issue_body_fixture, markdown_fixture,
     render_markdown_for_bench,
 };
+use std::hint::black_box;
 
 fn bench_issue_list_preview(c: &mut Criterion) {
     let mut group = c.benchmark_group("issue_list_preview");
