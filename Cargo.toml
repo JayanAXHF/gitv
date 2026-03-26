@@ -32,7 +32,7 @@ futures = "0.3.31"
 hyperrat = { path = "crates/hyperrat", version = "0.1.1" }
 inquire = "0.9.4"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
-octocrab = "0.49.5"
+octocrab = "0.49.6"
 pulldown-cmark = "0.13.0"
 regex = "1.11.1"
 rat-cursor = "2.0.0"
