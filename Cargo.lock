@@ -5151,9 +5151,9 @@ dependencies = [
 
 [[package]]
 name = "termprofile"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d7004b4490ec6138f06789f231d2e1f77531c1ca11dc3cf9fb18a7f094d5cdf"
+checksum = "58c83481d7a0153c7e418750832bd731dd548fa79bb306071b2182ec73cba1dd"
 dependencies = [
  "anstyle",
  "palette",
