@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.1...gitv-tui-v0.4.2) - 2026-03-31
+
+### <!-- 1 -->Bug Fixes
+
+- Fixed issue body not being editable and not having reactions
+
+### <!-- 10 -->Other
+
+- bump flake.lock
+
 ## [0.4.1](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.0...gitv-tui-v0.4.1) - 2026-03-21
 
 ### <!-- 1 -->Bug Fixes
