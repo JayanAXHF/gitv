@@ -68,9 +68,9 @@ pub const HELP: &[HelpElementKind] = &[
     crate::help_keybind!("l", "copy link to selected message"),
     crate::help_keybind!("Enter (popup)", "confirm close reason"),
     crate::help_keybind!("Ctrl+P", "toggle comment input/preview"),
-    crate::help_keybind!("e", "edit selected comment in external editor"),
-    crate::help_keybind!("r", "add reaction to selected comment"),
-    crate::help_keybind!("R", "remove reaction from selected comment"),
+    crate::help_keybind!("e", "edit selected issue body/comment"),
+    crate::help_keybind!("r", "add reaction to selected issue body/comment"),
+    crate::help_keybind!("R", "remove reaction from selected issue body/comment"),
     crate::help_keybind!("Ctrl+Enter / Alt+Enter", "send comment"),
     crate::help_keybind!("Esc", "exit fullscreen / return to issue list"),
 ];
@@ -221,6 +221,9 @@ pub struct IssueConversation {
     markdown_cache: HashMap<u64, MarkdownRender>,
     body_cache: Option<MarkdownRender>,
     body_cache_number: Option<u64>,
+    body_reaction_number: Option<u64>,
+    body_reactions: Option<Vec<(ReactionContent, u64)>>,
+    body_my_reactions: Option<Vec<ReactionContent>>,
     markdown_width: usize,
     loading: HashSet<u64>,
     timeline_loading: HashSet<u64>,
@@ -283,14 +286,20 @@ pub(crate) struct RenderedLink {
 #[derive(Debug, Clone)]
 enum ReactionMode {
     Add {
-        comment_id: u64,
+        target: MessageTarget,
         selected: usize,
     },
     Remove {
-        comment_id: u64,
+        target: MessageTarget,
         selected: usize,
         options: Vec<ReactionContent>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageTarget {
+    IssueBody(u64),
+    Comment(u64),
 }
 
 impl InputState {
@@ -324,6 +333,9 @@ impl IssueConversation {
             paragraph_state: Default::default(),
             body_cache: None,
             body_cache_number: None,
+            body_reaction_number: None,
+            body_reactions: None,
+            body_my_reactions: None,
             markdown_width: 0,
             loading: HashSet::new(),
             timeline_loading: HashSet::new(),
@@ -539,29 +551,25 @@ impl IssueConversation {
             return items;
         };
 
-        if let Some(body) = seed
-            .body
-            .as_ref()
-            .map(|b| b.as_ref())
-            .filter(|b| !b.trim().is_empty())
-        {
-            if self.body_cache_number != Some(seed.number) {
-                self.body_cache_number = Some(seed.number);
-                self.body_cache = None;
-            }
-            let body_lines = self
-                .body_cache
-                .get_or_insert_with(|| render_markdown(body, width, 2));
-            items.push(build_comment_preview_item(
-                seed.author.as_ref(),
-                seed.created_at.as_ref(),
-                &body_lines.lines,
-                preview_width,
-                seed.author.as_ref() == self.current_user,
-                None,
-            ));
-            self.message_keys.push(MessageKey::IssueBody(seed.number));
+        if self.body_cache_number != Some(seed.number) {
+            self.body_cache_number = Some(seed.number);
+            self.body_cache = None;
         }
+        let body_text = seed.body.as_deref().unwrap_or_default();
+        let body_lines = self
+            .body_cache
+            .get_or_insert_with(|| render_markdown(body_text, width, 2));
+        items.push(build_comment_preview_item(
+            seed.author.as_ref(),
+            seed.created_at.as_ref(),
+            &body_lines.lines,
+            preview_width,
+            seed.author.as_ref() == self.current_user,
+            self.body_reactions
+                .as_deref()
+                .filter(|_| self.body_reaction_number == Some(seed.number)),
+        ));
+        self.message_keys.push(MessageKey::IssueBody(seed.number));
 
         if self.cache_number == Some(seed.number) {
             trace!(
@@ -749,24 +757,34 @@ impl IssueConversation {
         }
     }
 
-    fn selected_comment_id(&self) -> Option<u64> {
+    fn selected_message_target(&self) -> Option<MessageTarget> {
         let selected = self.list_state.selected_checked()?;
         match self.message_keys.get(selected)? {
-            MessageKey::Comment(id) => Some(*id),
-            MessageKey::IssueBody(_) => None,
+            MessageKey::IssueBody(number) => Some(MessageTarget::IssueBody(*number)),
+            MessageKey::Comment(id) => Some(MessageTarget::Comment(*id)),
             MessageKey::Timeline(_) => None,
         }
     }
 
-    fn selected_comment(&self) -> Option<&CommentView> {
-        let id = self.selected_comment_id()?;
-        self.cache_comments.iter().find(|c| c.id == id)
+    fn selected_message_text(&self) -> Option<String> {
+        match self.selected_message_target()? {
+            MessageTarget::IssueBody(number) => self
+                .current
+                .as_ref()
+                .filter(|seed| seed.number == number)
+                .map(|seed| seed.body.as_deref().unwrap_or_default().to_string()),
+            MessageTarget::Comment(id) => self
+                .cache_comments
+                .iter()
+                .find(|comment| comment.id == id)
+                .map(|comment| comment.body.to_string()),
+        }
     }
 
-    async fn open_external_editor_for_comment(
+    async fn open_external_editor_for_message(
         &mut self,
         issue_number: u64,
-        comment_id: u64,
+        target: MessageTarget,
         initial_body: String,
     ) {
         let Some(action_tx) = self.action_tx.clone() else {
@@ -792,54 +810,90 @@ impl IssueConversation {
             .and_then(|edited| edited.map_err(|err| err.replace('\n', " ")));
 
             let _ = action_tx.send(Action::EditorModeChanged(false)).await;
-            let _ = action_tx
-                .send(Action::IssueCommentEditFinished {
+            let action = match target {
+                MessageTarget::IssueBody(_) => Action::IssueBodyEditFinished {
+                    issue_number,
+                    result,
+                },
+                MessageTarget::Comment(comment_id) => Action::IssueCommentEditFinished {
                     issue_number,
                     comment_id,
                     result,
-                })
-                .await;
+                },
+            };
+            let _ = action_tx.send(action).await;
             let _ = action_tx.send(Action::ForceRender).await;
         });
     }
 
-    async fn patch_comment(&mut self, issue_number: u64, comment_id: u64, body: String) {
+    async fn patch_message(&mut self, issue_number: u64, target: MessageTarget, body: String) {
         let Some(action_tx) = self.action_tx.clone() else {
             return;
         };
         let owner = self.owner.clone();
         let repo = self.repo.clone();
+        let issue_pool = self.issue_pool.clone();
 
         tokio::spawn(async move {
             let Some(client) = GITHUB_CLIENT.get() else {
-                let _ = action_tx
-                    .send(Action::IssueCommentEditFinished {
+                let action = match target {
+                    MessageTarget::IssueBody(_) => Action::IssueBodyEditFinished {
+                        issue_number,
+                        result: Err("GitHub client not initialized.".to_string()),
+                    },
+                    MessageTarget::Comment(comment_id) => Action::IssueCommentEditFinished {
                         issue_number,
                         comment_id,
                         result: Err("GitHub client not initialized.".to_string()),
-                    })
-                    .await;
+                    },
+                };
+                let _ = action_tx.send(action).await;
                 return;
             };
 
             let handler = client.inner().issues(owner, repo);
-            match handler.update_comment(CommentId(comment_id), body).await {
-                Ok(comment) => {
-                    let _ = action_tx
-                        .send(Action::IssueCommentPatched {
-                            issue_number,
-                            comment: CommentView::from_api(comment),
-                        })
-                        .await;
+            match target {
+                MessageTarget::IssueBody(number) => {
+                    match handler.update(number).body(&body).send().await {
+                        Ok(issue) => {
+                            let issue_id = {
+                                let mut pool =
+                                    issue_pool.write().expect("issue pool lock poisoned");
+                                let compact = UiIssue::from_octocrab(&issue, &mut pool);
+                                pool.upsert_issue(compact)
+                            };
+                            let _ = action_tx.send(Action::IssueBodyPatched { issue_id }).await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueBodyEditFinished {
+                                    issue_number,
+                                    result: Err(err.to_string().replace('\n', " ")),
+                                })
+                                .await;
+                        }
+                    }
                 }
-                Err(err) => {
-                    let _ = action_tx
-                        .send(Action::IssueCommentEditFinished {
-                            issue_number,
-                            comment_id,
-                            result: Err(err.to_string().replace('\n', " ")),
-                        })
-                        .await;
+                MessageTarget::Comment(comment_id) => {
+                    match handler.update_comment(CommentId(comment_id), body).await {
+                        Ok(comment) => {
+                            let _ = action_tx
+                                .send(Action::IssueCommentPatched {
+                                    issue_number,
+                                    comment: CommentView::from_api(comment),
+                                })
+                                .await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueCommentEditFinished {
+                                    issue_number,
+                                    comment_id,
+                                    result: Err(err.to_string().replace('\n', " ")),
+                                })
+                                .await;
+                        }
+                    }
                 }
             }
         });
@@ -965,24 +1019,40 @@ impl IssueConversation {
     }
 
     fn start_add_reaction_mode(&mut self) {
-        let Some(comment_id) = self.selected_comment_id() else {
-            self.reaction_error = Some("Select a comment to add a reaction.".to_string());
+        let Some(target) = self.selected_message_target() else {
+            self.reaction_error =
+                Some("Select the issue body or a comment to add a reaction.".to_string());
             return;
         };
         self.reaction_error = None;
         self.reaction_mode = Some(ReactionMode::Add {
-            comment_id,
+            target,
             selected: 0,
         });
     }
 
     fn start_remove_reaction_mode(&mut self) {
-        let Some(comment) = self.selected_comment() else {
-            self.reaction_error = Some("Select a comment to remove a reaction.".to_string());
+        let Some(target) = self.selected_message_target() else {
+            self.reaction_error =
+                Some("Select the issue body or a comment to remove a reaction.".to_string());
             return;
         };
-        let comment_id = comment.id;
-        let mut options = comment.my_reactions.as_ref().cloned().unwrap_or_default();
+
+        let mut options = match target {
+            MessageTarget::IssueBody(number) => {
+                if self.body_reaction_number != Some(number) {
+                    Vec::new()
+                } else {
+                    self.body_my_reactions.clone().unwrap_or_default()
+                }
+            }
+            MessageTarget::Comment(comment_id) => self
+                .cache_comments
+                .iter()
+                .find(|comment| comment.id == comment_id)
+                .and_then(|comment| comment.my_reactions.clone())
+                .unwrap_or_default(),
+        };
 
         options.sort_by_key(reaction_order);
         options.dedup();
@@ -992,7 +1062,7 @@ impl IssueConversation {
         }
         self.reaction_error = None;
         self.reaction_mode = Some(ReactionMode::Remove {
-            comment_id,
+            target,
             selected: 0,
             options,
         });
@@ -1003,7 +1073,7 @@ impl IssueConversation {
             return false;
         };
 
-        let mut submit: Option<(u64, ReactionContent, bool)> = None;
+        let mut submit: Option<(MessageTarget, ReactionContent, bool)> = None;
         match event {
             ct_event!(keycode press Esc) => {
                 self.reaction_mode = None;
@@ -1054,35 +1124,32 @@ impl IssueConversation {
                 }
             },
             ct_event!(keycode press Enter) => match mode {
-                ReactionMode::Add {
-                    comment_id,
-                    selected,
-                } => {
+                ReactionMode::Add { target, selected } => {
                     let options = reaction_add_options();
                     if let Some(content) = options.get(*selected).cloned() {
-                        submit = Some((*comment_id, content, true));
+                        submit = Some((*target, content, true));
                     }
                 }
                 ReactionMode::Remove {
-                    comment_id,
+                    target,
                     selected,
                     options,
                 } => {
                     if let Some(content) = options.get(*selected).cloned() {
-                        submit = Some((*comment_id, content, false));
+                        submit = Some((*target, content, false));
                     }
                 }
             },
             _ => return false,
         }
 
-        if let Some((comment_id, content, add)) = submit {
+        if let Some((target, content, add)) = submit {
             self.reaction_mode = None;
             self.reaction_error = None;
             if add {
-                self.add_reaction(comment_id, content).await;
+                self.add_reaction(target, content).await;
             } else {
-                self.remove_reaction(comment_id, content).await;
+                self.remove_reaction(target, content).await;
             }
             return true;
         }
@@ -1100,7 +1167,7 @@ impl IssueConversation {
         self.timeline_cache_number == Some(number)
     }
 
-    async fn add_reaction(&mut self, comment_id: u64, content: ReactionContent) {
+    async fn add_reaction(&mut self, target: MessageTarget, content: ReactionContent) {
         let Some(action_tx) = self.action_tx.clone() else {
             return;
         };
@@ -1111,93 +1178,51 @@ impl IssueConversation {
             let Some(client) = GITHUB_CLIENT.get() else {
                 let _ = action_tx
                     .send(Action::IssueReactionEditError {
-                        comment_id,
+                        comment_id: 0,
                         message: "GitHub client not initialized.".to_string(),
                     })
                     .await;
                 return;
             };
             let handler = client.inner().issues(owner, repo);
-            if let Err(err) = handler.create_comment_reaction(comment_id, content).await {
-                let _ = action_tx
-                    .send(Action::IssueReactionEditError {
-                        comment_id,
-                        message: err.to_string().replace('\n', " "),
-                    })
-                    .await;
-                return;
-            }
-
-            match handler.list_comment_reactions(comment_id).send().await {
-                Ok(mut page) => {
-                    let (counts, mine) =
-                        to_reaction_snapshot(std::mem::take(&mut page.items), &current_user);
-                    let mut reactions = HashMap::new();
-                    let mut own_reactions = HashMap::new();
-                    reactions.insert(comment_id, counts);
-                    own_reactions.insert(comment_id, mine);
-                    let _ = action_tx
-                        .send(Action::IssueReactionsLoaded {
-                            reactions,
-                            own_reactions,
-                        })
-                        .await;
-                }
-                Err(err) => {
-                    let _ = action_tx
-                        .send(Action::IssueReactionEditError {
-                            comment_id,
-                            message: err.to_string().replace('\n', " "),
-                        })
-                        .await;
-                }
-            }
-        });
-    }
-
-    async fn remove_reaction(&mut self, comment_id: u64, content: ReactionContent) {
-        let Some(action_tx) = self.action_tx.clone() else {
-            return;
-        };
-        let owner = self.owner.clone();
-        let repo = self.repo.clone();
-        let current_user = self.current_user.clone();
-        tokio::spawn(async move {
-            let Some(client) = GITHUB_CLIENT.get() else {
-                let _ = action_tx
-                    .send(Action::IssueReactionEditError {
-                        comment_id,
-                        message: "GitHub client not initialized.".to_string(),
-                    })
-                    .await;
-                return;
-            };
-            let handler = client.inner().issues(owner, repo);
-            match handler.list_comment_reactions(comment_id).send().await {
-                Ok(mut page) => {
-                    let mut items = std::mem::take(&mut page.items);
-                    let to_delete = items
-                        .iter()
-                        .find(|reaction| {
-                            reaction.content == content
-                                && reaction.user.login.eq_ignore_ascii_case(&current_user)
-                        })
-                        .map(|reaction| reaction.id);
-
-                    let Some(reaction_id) = to_delete else {
+            match target {
+                MessageTarget::IssueBody(number) => {
+                    if let Err(err) = handler.create_reaction(number, content).await {
                         let _ = action_tx
                             .send(Action::IssueReactionEditError {
-                                comment_id,
-                                message: "No matching reaction from current user.".to_string(),
+                                comment_id: 0,
+                                message: err.to_string().replace('\n', " "),
                             })
                             .await;
                         return;
-                    };
+                    }
 
-                    if let Err(err) = handler
-                        .delete_comment_reaction(comment_id, reaction_id)
-                        .await
-                    {
+                    match handler.list_reactions(number).send().await {
+                        Ok(mut page) => {
+                            let (reactions, own_reactions) = to_reaction_snapshot(
+                                std::mem::take(&mut page.items),
+                                &current_user,
+                            );
+                            let _ = action_tx
+                                .send(Action::IssueBodyReactionsLoaded {
+                                    number,
+                                    reactions,
+                                    own_reactions,
+                                })
+                                .await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueReactionEditError {
+                                    comment_id: 0,
+                                    message: err.to_string().replace('\n', " "),
+                                })
+                                .await;
+                        }
+                    }
+                }
+                MessageTarget::Comment(comment_id) => {
+                    if let Err(err) = handler.create_comment_reaction(comment_id, content).await {
                         let _ = action_tx
                             .send(Action::IssueReactionEditError {
                                 comment_id,
@@ -1207,39 +1232,193 @@ impl IssueConversation {
                         return;
                     }
 
-                    let mut removed = false;
-                    let (counts, mine) = to_reaction_snapshot(
-                        items.drain(..).filter_map(|reaction| {
-                            if !removed
-                                && reaction.content == content
-                                && reaction.user.login.eq_ignore_ascii_case(&current_user)
-                            {
-                                removed = true;
-                                None
-                            } else {
-                                Some(reaction)
-                            }
-                        }),
-                        &current_user,
-                    );
-                    let mut reactions = HashMap::new();
-                    let mut own_reactions = HashMap::new();
-                    reactions.insert(comment_id, counts);
-                    own_reactions.insert(comment_id, mine);
-                    let _ = action_tx
-                        .send(Action::IssueReactionsLoaded {
-                            reactions,
-                            own_reactions,
-                        })
-                        .await;
+                    match handler.list_comment_reactions(comment_id).send().await {
+                        Ok(mut page) => {
+                            let (counts, mine) = to_reaction_snapshot(
+                                std::mem::take(&mut page.items),
+                                &current_user,
+                            );
+                            let mut reactions = HashMap::new();
+                            let mut own_reactions = HashMap::new();
+                            reactions.insert(comment_id, counts);
+                            own_reactions.insert(comment_id, mine);
+                            let _ = action_tx
+                                .send(Action::IssueReactionsLoaded {
+                                    reactions,
+                                    own_reactions,
+                                })
+                                .await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueReactionEditError {
+                                    comment_id,
+                                    message: err.to_string().replace('\n', " "),
+                                })
+                                .await;
+                        }
+                    }
                 }
-                Err(err) => {
-                    let _ = action_tx
-                        .send(Action::IssueReactionEditError {
-                            comment_id,
-                            message: err.to_string().replace('\n', " "),
-                        })
-                        .await;
+            }
+        });
+    }
+
+    async fn remove_reaction(&mut self, target: MessageTarget, content: ReactionContent) {
+        let Some(action_tx) = self.action_tx.clone() else {
+            return;
+        };
+        let owner = self.owner.clone();
+        let repo = self.repo.clone();
+        let current_user = self.current_user.clone();
+        tokio::spawn(async move {
+            let Some(client) = GITHUB_CLIENT.get() else {
+                let _ = action_tx
+                    .send(Action::IssueReactionEditError {
+                        comment_id: 0,
+                        message: "GitHub client not initialized.".to_string(),
+                    })
+                    .await;
+                return;
+            };
+            let handler = client.inner().issues(owner, repo);
+            match target {
+                MessageTarget::IssueBody(number) => {
+                    match handler.list_reactions(number).send().await {
+                        Ok(mut page) => {
+                            let mut items = std::mem::take(&mut page.items);
+                            let to_delete = items
+                                .iter()
+                                .find(|reaction| {
+                                    reaction.content == content
+                                        && reaction.user.login.eq_ignore_ascii_case(&current_user)
+                                })
+                                .map(|reaction| reaction.id);
+
+                            let Some(reaction_id) = to_delete else {
+                                let _ = action_tx
+                                    .send(Action::IssueReactionEditError {
+                                        comment_id: 0,
+                                        message: "No matching reaction from current user."
+                                            .to_string(),
+                                    })
+                                    .await;
+                                return;
+                            };
+
+                            if let Err(err) = handler.delete_reaction(number, reaction_id).await {
+                                let _ = action_tx
+                                    .send(Action::IssueReactionEditError {
+                                        comment_id: 0,
+                                        message: err.to_string().replace('\n', " "),
+                                    })
+                                    .await;
+                                return;
+                            }
+
+                            let mut removed = false;
+                            let (reactions, own_reactions) = to_reaction_snapshot(
+                                items.drain(..).filter_map(|reaction| {
+                                    if !removed
+                                        && reaction.content == content
+                                        && reaction.user.login.eq_ignore_ascii_case(&current_user)
+                                    {
+                                        removed = true;
+                                        None
+                                    } else {
+                                        Some(reaction)
+                                    }
+                                }),
+                                &current_user,
+                            );
+                            let _ = action_tx
+                                .send(Action::IssueBodyReactionsLoaded {
+                                    number,
+                                    reactions,
+                                    own_reactions,
+                                })
+                                .await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueReactionEditError {
+                                    comment_id: 0,
+                                    message: err.to_string().replace('\n', " "),
+                                })
+                                .await;
+                        }
+                    }
+                }
+                MessageTarget::Comment(comment_id) => {
+                    match handler.list_comment_reactions(comment_id).send().await {
+                        Ok(mut page) => {
+                            let mut items = std::mem::take(&mut page.items);
+                            let to_delete = items
+                                .iter()
+                                .find(|reaction| {
+                                    reaction.content == content
+                                        && reaction.user.login.eq_ignore_ascii_case(&current_user)
+                                })
+                                .map(|reaction| reaction.id);
+
+                            let Some(reaction_id) = to_delete else {
+                                let _ = action_tx
+                                    .send(Action::IssueReactionEditError {
+                                        comment_id,
+                                        message: "No matching reaction from current user."
+                                            .to_string(),
+                                    })
+                                    .await;
+                                return;
+                            };
+
+                            if let Err(err) = handler
+                                .delete_comment_reaction(comment_id, reaction_id)
+                                .await
+                            {
+                                let _ = action_tx
+                                    .send(Action::IssueReactionEditError {
+                                        comment_id,
+                                        message: err.to_string().replace('\n', " "),
+                                    })
+                                    .await;
+                                return;
+                            }
+
+                            let mut removed = false;
+                            let (counts, mine) = to_reaction_snapshot(
+                                items.drain(..).filter_map(|reaction| {
+                                    if !removed
+                                        && reaction.content == content
+                                        && reaction.user.login.eq_ignore_ascii_case(&current_user)
+                                    {
+                                        removed = true;
+                                        None
+                                    } else {
+                                        Some(reaction)
+                                    }
+                                }),
+                                &current_user,
+                            );
+                            let mut reactions = HashMap::new();
+                            let mut own_reactions = HashMap::new();
+                            reactions.insert(comment_id, counts);
+                            own_reactions.insert(comment_id, mine);
+                            let _ = action_tx
+                                .send(Action::IssueReactionsLoaded {
+                                    reactions,
+                                    own_reactions,
+                                })
+                                .await;
+                        }
+                        Err(err) => {
+                            let _ = action_tx
+                                .send(Action::IssueReactionEditError {
+                                    comment_id,
+                                    message: err.to_string().replace('\n', " "),
+                                })
+                                .await;
+                        }
+                    }
                 }
             }
         });
@@ -1317,6 +1496,17 @@ impl IssueConversation {
                             own_reactions,
                         })
                         .await;
+                    if let Ok(mut page) = handler.list_reactions(number).send().await {
+                        let (reactions, own_reactions) =
+                            to_reaction_snapshot(std::mem::take(&mut page.items), &current_user);
+                        let _ = action_tx
+                            .send(Action::IssueBodyReactionsLoaded {
+                                number,
+                                reactions,
+                                own_reactions,
+                            })
+                            .await;
+                    }
                 }
                 Err(err) => {
                     let _ = action_tx
@@ -1557,30 +1747,31 @@ impl Component for IssueConversation {
                                 || self.body_paragraph_state.is_focused()) =>
                     {
                         let seed = self.current.as_ref().ok_or_else(|| {
-                            AppError::Other(anyhow!("no issue selected for comment editing"))
+                            AppError::Other(anyhow!("no issue selected for message editing"))
                         })?;
-                        let comment = self
-                            .selected_comment()
-                            .ok_or_else(|| AppError::Other(anyhow!("select a comment to edit")))?;
-                        self.open_external_editor_for_comment(
-                            seed.number,
-                            comment.id,
-                            comment.body.to_string(),
-                        )
-                        .await;
+                        let target = self.selected_message_target().ok_or_else(|| {
+                            AppError::Other(anyhow!("select the issue body or a comment to edit"))
+                        })?;
+                        let body = self.selected_message_text().ok_or_else(|| {
+                            AppError::Other(anyhow!("selected message is no longer available"))
+                        })?;
+                        self.open_external_editor_for_message(seed.number, target, body)
+                            .await;
                         return Ok(());
                     }
                     event::Event::Key(key)
                         if key.code == event::KeyCode::Char('r')
                             && key.modifiers == event::KeyModifiers::NONE
-                            && self.list_state.is_focused() =>
+                            && (self.list_state.is_focused()
+                                || self.body_paragraph_state.is_focused()) =>
                     {
                         self.start_add_reaction_mode();
                         return Ok(());
                     }
                     event::Event::Key(key)
                         if key.code == event::KeyCode::Char('R')
-                            && self.list_state.is_focused() =>
+                            && (self.list_state.is_focused()
+                                || self.body_paragraph_state.is_focused()) =>
                     {
                         self.start_remove_reaction_mode();
                         return Ok(());
@@ -1666,19 +1857,20 @@ impl Component for IssueConversation {
                         if self.list_state.is_focused()
                             || self.body_paragraph_state.is_focused() =>
                     {
-                        if let Some(comment) = self.selected_comment() {
-                            let comment_body = comment.body.as_ref();
-                            let quoted = comment_body
+                        if let Some(message_body) = self.selected_message_text() {
+                            let quoted = message_body
                                 .lines()
                                 .map(|line| format!("> {}", line.trim()))
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                            self.input_state.insert_str(&quoted);
-                            self.input_state.insert_newline();
-                            self.input_state.move_to_end(false);
-                            self.input_state.move_to_line_end(false);
-                            self.input_state.focus.set(true);
-                            self.list_state.focus.set(false);
+                            if !quoted.is_empty() {
+                                self.input_state.insert_str(&quoted);
+                                self.input_state.insert_newline();
+                                self.input_state.move_to_end(false);
+                                self.input_state.move_to_line_end(false);
+                                self.input_state.focus.set(true);
+                                self.list_state.focus.set(false);
+                            }
                         }
                     }
 
@@ -1741,6 +1933,11 @@ impl Component for IssueConversation {
                 self.timeline_error = None;
                 self.body_cache = None;
                 self.body_cache_number = Some(number);
+                if self.body_reaction_number != Some(number) {
+                    self.body_reaction_number = None;
+                    self.body_reactions = None;
+                    self.body_my_reactions = None;
+                }
                 self.body_paragraph_state.set_line_offset(0);
                 if self.cache_number != Some(number) {
                     self.cache_number = None;
@@ -1792,6 +1989,22 @@ impl Component for IssueConversation {
                         comment.my_reactions =
                             Some(own_reactions.get(&id).cloned().unwrap_or_else(Vec::new));
                     }
+                }
+            }
+            Action::IssueBodyReactionsLoaded {
+                number,
+                reactions,
+                own_reactions,
+            } => {
+                if self
+                    .current
+                    .as_ref()
+                    .is_some_and(|seed| seed.number == number)
+                {
+                    self.reaction_error = None;
+                    self.body_reaction_number = Some(number);
+                    self.body_reactions = Some(reactions);
+                    self.body_my_reactions = Some(own_reactions);
                 }
             }
             Action::IssueReactionEditError {
@@ -1873,14 +2086,57 @@ impl Component for IssueConversation {
                                 "comment cannot be empty after editing"
                             )));
                         }
-                        self.patch_comment(issue_number, comment_id, trimmed.to_string())
-                            .await;
+                        self.patch_message(
+                            issue_number,
+                            MessageTarget::Comment(comment_id),
+                            trimmed.to_string(),
+                        )
+                        .await;
                         if let Some(action_tx) = self.action_tx.as_ref() {
                             action_tx.send(Action::ForceRender).await?;
                         }
                     }
                     Err(message) => {
                         return Err(AppError::Other(anyhow!("comment edit failed: {message}")));
+                    }
+                }
+            }
+            Action::IssueBodyEditFinished {
+                issue_number,
+                result,
+            } => {
+                if self
+                    .current
+                    .as_ref()
+                    .is_none_or(|seed| seed.number != issue_number)
+                {
+                    return Ok(());
+                }
+                match result {
+                    Ok(body) => {
+                        let normalized = body.trim_end_matches('\n').to_string();
+                        let existing = self
+                            .current
+                            .as_ref()
+                            .and_then(|seed| seed.body.as_deref())
+                            .unwrap_or_default();
+                        if normalized == existing {
+                            return Ok(());
+                        }
+                        self.patch_message(
+                            issue_number,
+                            MessageTarget::IssueBody(issue_number),
+                            normalized,
+                        )
+                        .await;
+                        if let Some(action_tx) = self.action_tx.as_ref() {
+                            action_tx.send(Action::ForceRender).await?;
+                        }
+                    }
+                    Err(message) => {
+                        return Err(AppError::Other(anyhow!(
+                            "issue body edit failed: {message}"
+                        )));
                     }
                 }
             }
@@ -1901,6 +2157,34 @@ impl Component for IssueConversation {
                     existing.reactions = reactions;
                     existing.my_reactions = my_reactions;
                     self.markdown_cache.remove(&existing.id);
+                }
+            }
+            Action::IssueBodyPatched { issue_id } => {
+                let (number, seed, preview_seed) = {
+                    let pool = self.issue_pool.read().expect("issue pool lock poisoned");
+                    let issue = pool.get_issue(issue_id);
+                    (
+                        issue.number,
+                        IssueConversationSeed::from_ui_issue(issue, &pool),
+                        crate::ui::components::issue_detail::IssuePreviewSeed::from_ui_issue(
+                            issue, &pool,
+                        ),
+                    )
+                };
+                if self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.number == number)
+                {
+                    self.title = seed.title.clone();
+                    self.current = Some(seed);
+                    self.body_cache = None;
+                    self.body_cache_number = Some(number);
+                    if let Some(action_tx) = self.action_tx.as_ref() {
+                        let _ = action_tx
+                            .send(Action::SelectedIssuePreview { seed: preview_seed })
+                            .await;
+                    }
                 }
             }
             Action::IssueCloseSuccess { issue_id } => {

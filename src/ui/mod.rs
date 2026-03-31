@@ -690,6 +690,11 @@ pub enum Action {
         reactions: HashMap<u64, Vec<(ReactionContent, u64)>>,
         own_reactions: HashMap<u64, Vec<ReactionContent>>,
     },
+    IssueBodyReactionsLoaded {
+        number: u64,
+        reactions: Vec<(ReactionContent, u64)>,
+        own_reactions: Vec<ReactionContent>,
+    },
     IssueReactionEditError {
         comment_id: u64,
         message: String,
@@ -711,9 +716,16 @@ pub enum Action {
         comment_id: u64,
         result: std::result::Result<String, String>,
     },
+    IssueBodyEditFinished {
+        issue_number: u64,
+        result: std::result::Result<String, String>,
+    },
     IssueCommentPatched {
         issue_number: u64,
         comment: CommentView,
+    },
+    IssueBodyPatched {
+        issue_id: IssueId,
     },
     EnterIssueCreate,
     IssueCreateSuccess {
