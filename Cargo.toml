@@ -75,7 +75,7 @@ vergen-gix = { version = "10.0.0-beta.6", features = ["build", "cargo", "allow_r
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 fake = "5.1.0"
-insta = "1.40"
+insta = "1.47"
 
 [[bench]]
 name = "ui_hotspots"
