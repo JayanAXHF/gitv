@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.2...gitv-tui-v0.4.3) - 2026-04-19
+
+### <!-- 10 -->Other
+
+- *(ci)* add cargo-machete ci job
+
+### <!-- 7 -->Miscellaneous Tasks
+
+- fix clippy lints
+
 ## [0.4.2](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.1...gitv-tui-v0.4.2) - 2026-03-31
 
 ### <!-- 1 -->Bug Fixes
