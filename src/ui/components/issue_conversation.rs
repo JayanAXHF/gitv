@@ -1995,17 +1995,14 @@ impl Component for IssueConversation {
                 number,
                 reactions,
                 own_reactions,
-            } => {
-                if self
-                    .current
-                    .as_ref()
-                    .is_some_and(|seed| seed.number == number)
-                {
-                    self.reaction_error = None;
-                    self.body_reaction_number = Some(number);
-                    self.body_reactions = Some(reactions);
-                    self.body_my_reactions = Some(own_reactions);
-                }
+            } if self
+                .current
+                .as_ref()
+                .is_some_and(|seed| seed.number == number) => {
+                self.reaction_error = None;
+                self.body_reaction_number = Some(number);
+                self.body_reactions = Some(reactions);
+                self.body_my_reactions = Some(own_reactions);
             }
             Action::IssueReactionEditError {
                 comment_id: _,

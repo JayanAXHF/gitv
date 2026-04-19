@@ -245,10 +245,8 @@ impl Component for TextSearch {
             Action::FinishedLoading => {
                 self.state = State::Loaded;
             }
-            Action::Tick => {
-                if self.state == State::Loading {
-                    self.loader_state.calc_next();
-                }
+            Action::Tick if self.state == State::Loading => {
+                self.loader_state.calc_next();
             }
             _ => {}
         }

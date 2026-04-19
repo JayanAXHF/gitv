@@ -473,19 +473,15 @@ impl Component for IssueCreate {
                     }
                 }
             }
-            Action::Tick => {
-                if self.creating {
-                    self.create_throbber_state.calc_next();
-                }
+            Action::Tick if self.creating => {
+                self.create_throbber_state.calc_next();
             }
             Action::EnterIssueCreate => {
                 self.screen = MainScreen::CreateIssue;
                 self.reset_form();
             }
-            Action::IssueCreateSuccess { issue_id } => {
-                if self.screen == MainScreen::CreateIssue {
-                    self.handle_create_success(issue_id).await;
-                }
+            Action::IssueCreateSuccess { issue_id } if self.screen == MainScreen::CreateIssue => {
+                self.handle_create_success(issue_id).await;
             }
             Action::IssueCreateError { message } => {
                 self.creating = false;

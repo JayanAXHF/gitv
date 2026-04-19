@@ -934,26 +934,20 @@ impl Component for LabelList {
                             && self.popup_search.is_none()
                         {
                             match key.code {
-                                crossterm::event::KeyCode::Char('a') => {
-                                    if self.state.is_focused() {
-                                        self.state.focus.set(false);
-                                        let input = TextInputState::new_focused();
-                                        next_mode = Some(LabelEditMode::Adding { input });
-                                        handled = true;
-                                    }
+                                crossterm::event::KeyCode::Char('a') if self.state.is_focused() => {
+                                    self.state.focus.set(false);
+                                    let input = TextInputState::new_focused();
+                                    next_mode = Some(LabelEditMode::Adding { input });
+                                    handled = true;
                                 }
-                                crossterm::event::KeyCode::Char('d') => {
-                                    if self.state.is_focused() {
-                                        self.handle_remove_selected().await;
-                                        handled = true;
-                                    }
+                                crossterm::event::KeyCode::Char('d') if self.state.is_focused() => {
+                                    self.handle_remove_selected().await;
+                                    handled = true;
                                 }
-                                crossterm::event::KeyCode::Char('f') => {
-                                    if self.state.is_focused() {
-                                        self.state.focus.set(false);
-                                        self.open_popup_search();
-                                        handled = true;
-                                    }
+                                crossterm::event::KeyCode::Char('f') if self.state.is_focused() => {
+                                    self.state.focus.set(false);
+                                    self.open_popup_search();
+                                    handled = true;
                                 }
                                 _ => {}
                             }
@@ -1105,24 +1099,24 @@ impl Component for LabelList {
                 self.set_mode(LabelEditMode::Idle);
                 self.close_popup_search();
             }
-            Action::IssueLabelsUpdated { number, labels } => {
-                if Some(number) == self.current_issue_number {
-                    let prev = self
-                        .state
-                        .selected_checked()
-                        .and_then(|idx| self.labels.get(idx).map(|label| label.name.clone()));
-                    self.labels = labels
-                        .into_iter()
-                        .map(Into::<LabelListItem>::into)
-                        .collect();
-                    self.reset_selection(prev);
-                    let status = self
-                        .pending_status
-                        .take()
-                        .unwrap_or_else(|| "Labels updated.".to_string());
-                    self.set_status(status);
-                    self.set_mode(LabelEditMode::Idle);
-                }
+            Action::IssueLabelsUpdated { number, labels }
+                if Some(number) == self.current_issue_number =>
+            {
+                let prev = self
+                    .state
+                    .selected_checked()
+                    .and_then(|idx| self.labels.get(idx).map(|label| label.name.clone()));
+                self.labels = labels
+                    .into_iter()
+                    .map(Into::<LabelListItem>::into)
+                    .collect();
+                self.reset_selection(prev);
+                let status = self
+                    .pending_status
+                    .take()
+                    .unwrap_or_else(|| "Labels updated.".to_string());
+                self.set_status(status);
+                self.set_mode(LabelEditMode::Idle);
             }
             Action::LabelSearchPageAppend {
                 request_id,

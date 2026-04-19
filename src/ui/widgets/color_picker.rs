@@ -81,29 +81,21 @@ impl HandleEvent<Event, Regular, Outcome> for ColorPickerState {
             return Outcome::Continue;
         };
         match key.code {
-            KeyCode::Up => {
-                if self.row > 0 {
-                    self.row -= 1;
-                    return Outcome::Changed;
-                }
+            KeyCode::Up if self.row > 0 => {
+                self.row -= 1;
+                return Outcome::Changed;
             }
-            KeyCode::Down => {
-                if self.row + 1 < HUES.len() {
-                    self.row += 1;
-                    return Outcome::Changed;
-                }
+            KeyCode::Down if self.row + 1 < HUES.len() => {
+                self.row += 1;
+                return Outcome::Changed;
             }
-            KeyCode::Left => {
-                if self.col > 0 {
-                    self.col -= 1;
-                    return Outcome::Changed;
-                }
+            KeyCode::Left if self.col > 0 => {
+                self.col -= 1;
+                return Outcome::Changed;
             }
-            KeyCode::Right => {
-                if self.col + 1 < HUES[0].1.len() {
-                    self.col += 1;
-                    return Outcome::Changed;
-                }
+            KeyCode::Right if self.col + 1 < HUES[0].1.len() => {
+                self.col += 1;
+                return Outcome::Changed;
             }
             _ => {}
         }
