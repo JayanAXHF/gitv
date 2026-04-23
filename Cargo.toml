@@ -44,7 +44,7 @@ termprofile = { version = "0.2.3", features = ["convert", "ratatui"] }
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
 thiserror = "2.0.18"
 throbber-widgets-tui = "0.11.0"
-tokio = { version = "1.51", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
 tokio-util = "0.7.18"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
