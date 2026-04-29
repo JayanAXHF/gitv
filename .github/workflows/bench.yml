@@ -1,0 +1,47 @@
+  # Bencher regression detection. Requires:
+  # - BENCHER_API_TOKEN repo secret (https://bencher.dev/docs)
+  # - BENCHER_PROJECT repo variable (your Bencher project slug)
+  bench:
+    if: {% raw %}${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.BENCHER_PROJECT != '' }}{% endraw %}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: {{ pin_github_action("actions/checkout", "v6") }}
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: {{ pin_github_action("Swatinem/rust-cache", "v2") }}
+        with:
+          save-if: {% raw %}${{ github.ref == 'refs/heads/main' }}{% endraw %}
+      - uses: {{ pin_github_action("bencherdev/bencher", "v0") }}
+      - run: |
+          bencher run \
+            --project {% raw %}${{ vars.BENCHER_PROJECT }}{% endraw %} \
+            --token {% raw %}${{ secrets.BENCHER_API_TOKEN }}{% endraw %} \
+            --branch main \
+            --adapter rust_criterion \
+            "cargo bench --all-features"
+  bench-pr:
+    if: {% raw %}${{ github.event_name == 'pull_request' && vars.BENCHER_PROJECT != '' }}{% endraw %}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: {{ pin_github_action("actions/checkout", "v6") }}
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: {{ pin_github_action("Swatinem/rust-cache", "v2") }}
+        with:
+          save-if: {% raw %}${{ github.ref == 'refs/heads/main' }}{% endraw %}
+      - uses: {{ pin_github_action("bencherdev/bencher", "v0") }}
+      - run: |
+          bencher run \
+            --project {% raw %}${{ vars.BENCHER_PROJECT }}{% endraw %} \
+            --token {% raw %}${{ secrets.BENCHER_API_TOKEN }}{% endraw %} \
+            --branch {% raw %}${{ github.head_ref }}{% endraw %} \
+            --start-point main \
+            --start-point-reset \
+            --adapter rust_criterion \
+            --error-on-alert \
+            --github-actions {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %} \
+            "cargo bench --all-features"
