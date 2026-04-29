@@ -42,7 +42,7 @@ use crate::{
     app::GITHUB_CLIENT,
     errors::AppError,
     ui::{
-        Action,
+        Action, ExternalEditorTarget,
         components::{
             Component,
             help::HelpElementKind,
@@ -790,40 +790,18 @@ impl IssueConversation {
         let Some(action_tx) = self.action_tx.clone() else {
             return;
         };
-        if action_tx
-            .send(Action::EditorModeChanged(true))
-            .await
-            .is_err()
-        {
-            return;
-        }
+        let target = match target {
+            MessageTarget::IssueBody(_) => ExternalEditorTarget::IssueBody,
+            MessageTarget::Comment(comment_id) => ExternalEditorTarget::Comment { comment_id },
+        };
 
-        tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                ratatui::restore();
-                let edited = edit::edit(&initial_body).map_err(|err| err.to_string());
-                let _ = ratatui::init();
-                edited
+        let _ = action_tx
+            .send(Action::OpenExternalEditor {
+                issue_number,
+                target,
+                initial_body,
             })
-            .await
-            .map_err(|err| err.to_string())
-            .and_then(|edited| edited.map_err(|err| err.replace('\n', " ")));
-
-            let _ = action_tx.send(Action::EditorModeChanged(false)).await;
-            let action = match target {
-                MessageTarget::IssueBody(_) => Action::IssueBodyEditFinished {
-                    issue_number,
-                    result,
-                },
-                MessageTarget::Comment(comment_id) => Action::IssueCommentEditFinished {
-                    issue_number,
-                    comment_id,
-                    result,
-                },
-            };
-            let _ = action_tx.send(action).await;
-            let _ = action_tx.send(Action::ForceRender).await;
-        });
+            .await;
     }
 
     async fn patch_message(&mut self, issue_number: u64, target: MessageTarget, body: String) {
@@ -1998,7 +1976,8 @@ impl Component for IssueConversation {
             } if self
                 .current
                 .as_ref()
-                .is_some_and(|seed| seed.number == number) => {
+                .is_some_and(|seed| seed.number == number) =>
+            {
                 self.reaction_error = None;
                 self.body_reaction_number = Some(number);
                 self.body_reactions = Some(reactions);
