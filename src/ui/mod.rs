@@ -54,13 +54,13 @@ use ratatui::{
 use std::{
     collections::HashMap,
     fmt::Display,
-    io::stdout,
+    io::{Stdout, stdout},
     sync::{Arc, OnceLock, RwLock},
     time::{self},
 };
 use tachyonfx::{EffectManager, Interpolation, fx};
 use termprofile::{DetectorSettings, TermProfile};
-use tokio::{select, sync::mpsc::Sender};
+use tokio::{select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, trace};
 
@@ -129,12 +129,24 @@ struct App {
     help: Option<&'static [HelpElementKind]>,
     in_help: bool,
     in_editor: bool,
+    event_pump: Option<EventPump>,
     last_frame: time::Instant,
     current_screen: MainScreen,
     last_focused: Option<FocusFlag>,
     last_event_error: Option<String>,
     effects_manager: EffectManager<()>,
     bookmarks: Arc<RwLock<Bookmarks>>,
+}
+
+struct EventPump {
+    cancel: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalEditorTarget {
+    IssueBody,
+    Comment { comment_id: u64 },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -224,6 +236,7 @@ impl App {
             in_help: false,
             last_frame: time::Instant::now(),
             in_editor: false,
+            event_pump: None,
             current_screen: MainScreen::default(),
             help: None,
             action_tx,
@@ -243,9 +256,8 @@ impl App {
     }
     pub async fn run(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<impl std::io::Write>>,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<(), AppError> {
-        let ctok = self.cancel_action.clone();
         let action_tx = self.action_tx.clone();
         for component in self.components.iter_mut() {
             component.register_action_tx(action_tx.clone());
@@ -254,29 +266,7 @@ impl App {
         if let Err(err) = setup_terminal() {
             self.capture_error(err);
         }
-
-        tokio::spawn(async move {
-            let mut tick_interval = tokio::time::interval(TICK_RATE);
-            let mut event_stream = EventStream::new();
-
-            loop {
-                let event = select! {
-                    _ = ctok.cancelled() => break,
-                    _ = tick_interval.tick() => Action::Tick,
-                    kevent = event_stream.next().fuse() => {
-                        match kevent {
-                            Some(Ok(kevent)) => Action::AppEvent(kevent),
-                            Some(Err(..)) => Action::None,
-                            None => break,
-                        }
-                    }
-                };
-                if action_tx.send(event).await.is_err() {
-                    break;
-                }
-            }
-            Ok::<(), AppError>(())
-        });
+        self.start_event_pump();
         focus_noret(self);
         if let Some(ref mut focus) = self.focus {
             if let Some(last) = self.components.last() {
@@ -293,14 +283,7 @@ impl App {
             let mut should_draw_error_popup = false;
             let mut full_redraw = false;
             if let Some(ref action) = action {
-                if let Action::EditorModeChanged(enabled) = action {
-                    self.in_editor = *enabled;
-                    if *enabled {
-                        continue;
-                    }
-                    full_redraw = true;
-                }
-                if self.in_editor && matches!(action, Action::Tick | Action::AppEvent(_)) {
+                if self.in_editor && should_ignore_action_in_editor(action) {
                     continue;
                 }
                 for component in self.components.iter_mut() {
@@ -398,11 +381,27 @@ impl App {
                         should_draw_error_popup = true;
                     }
                 }
+                Some(Action::OpenExternalEditor {
+                    issue_number,
+                    target,
+                    ref initial_body,
+                }) => {
+                    full_redraw = true;
+                    if let Err(err) = self
+                        .run_external_editor_session(
+                            terminal,
+                            issue_number,
+                            target,
+                            initial_body.clone(),
+                        )
+                        .await
+                    {
+                        self.capture_error(err);
+                        should_draw_error_popup = true;
+                    }
+                }
                 Some(Action::SetHelp(help)) => {
                     self.help = Some(help);
-                }
-                Some(Action::EditorModeChanged(enabled)) => {
-                    self.in_editor = enabled;
                 }
                 Some(Action::ChangeIssueScreen(screen)) => {
                     self.current_screen = screen;
@@ -431,6 +430,7 @@ impl App {
                 }
             }
             if self.cancel_action.is_cancelled() {
+                self.stop_event_pump().await;
                 if let Ok(bm) = self.bookmarks.try_write() {
                     if let Err(err) = bm.write_to_file() {
                         error!(error = %err, "failed to write bookmarks to file on shutdown");
@@ -446,6 +446,92 @@ impl App {
 
         Ok(())
     }
+
+    fn start_event_pump(&mut self) {
+        if self.event_pump.is_some() {
+            return;
+        }
+
+        let cancel = CancellationToken::new();
+        let ctok = self.cancel_action.clone();
+        let event_cancel = cancel.clone();
+        let action_tx = self.action_tx.clone();
+        let task = tokio::spawn(async move {
+            let mut tick_interval = tokio::time::interval(TICK_RATE);
+            let mut event_stream = EventStream::new();
+
+            loop {
+                let event = select! {
+                    _ = ctok.cancelled() => break,
+                    _ = event_cancel.cancelled() => break,
+                    _ = tick_interval.tick() => Action::Tick,
+                    kevent = event_stream.next().fuse() => {
+                        match kevent {
+                            Some(Ok(kevent)) => Action::AppEvent(kevent),
+                            Some(Err(..)) => Action::None,
+                            None => break,
+                        }
+                    }
+                };
+                if action_tx.send(event).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        self.event_pump = Some(EventPump { cancel, task });
+    }
+
+    async fn stop_event_pump(&mut self) {
+        let Some(EventPump { cancel, task }) = self.event_pump.take() else {
+            return;
+        };
+
+        cancel.cancel();
+        if let Err(err) = task.await {
+            error!(error = %err, "event pump task failed to join");
+        }
+    }
+
+    async fn run_external_editor_session(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        issue_number: u64,
+        target: ExternalEditorTarget,
+        initial_body: String,
+    ) -> Result<(), AppError> {
+        self.in_editor = true;
+        self.stop_event_pump().await;
+
+        ratatui::restore();
+        finish_teardown()?;
+
+        let result = tokio::task::spawn_blocking(move || {
+            edit::edit(&initial_body).map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| AppError::Other(anyhow!("editor task failed: {err}")))?
+        .map_err(|err| err.replace('\n', " "));
+
+        *terminal = ratatui::init();
+        setup_terminal()?;
+        self.start_event_pump();
+        self.in_editor = false;
+
+        self.action_tx
+            .send(editor_result_action(issue_number, target, result))
+            .await
+            .map_err(|err| AppError::Other(anyhow!("failed to deliver editor result: {err}")))?;
+        self.action_tx
+            .send(Action::ForceRender)
+            .await
+            .map_err(|err| {
+                AppError::Other(anyhow!("failed to schedule redraw after editor: {err}"))
+            })?;
+
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     async fn handle_event(&mut self, event: &crossterm::event::Event) -> Result<(), AppError> {
         use crossterm::event::Event::Key;
@@ -557,10 +643,7 @@ impl App {
             .any(|component| component.should_render() && component.is_animating())
     }
 
-    fn draw(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<impl std::io::Write>>,
-    ) -> Result<(), AppError> {
+    fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), AppError> {
         terminal.draw(|f| {
             let elapsed = self.last_frame.elapsed();
             self.last_frame = time::Instant::now();
@@ -623,6 +706,28 @@ impl App {
             }
         })?;
         Ok(())
+    }
+}
+
+fn should_ignore_action_in_editor(action: &Action) -> bool {
+    matches!(action, Action::Tick | Action::AppEvent(_))
+}
+
+fn editor_result_action(
+    issue_number: u64,
+    target: ExternalEditorTarget,
+    result: std::result::Result<String, String>,
+) -> Action {
+    match target {
+        ExternalEditorTarget::IssueBody => Action::IssueBodyEditFinished {
+            issue_number,
+            result,
+        },
+        ExternalEditorTarget::Comment { comment_id } => Action::IssueCommentEditFinished {
+            issue_number,
+            comment_id,
+            result,
+        },
     }
 }
 
@@ -771,7 +876,11 @@ pub enum Action {
     ForceFocusChange,
     ForceFocusChangeRev,
     SetHelp(&'static [HelpElementKind]),
-    EditorModeChanged(bool),
+    OpenExternalEditor {
+        issue_number: u64,
+        target: ExternalEditorTarget,
+        initial_body: String,
+    },
     ToastAction(ratatui_toaster::ToastMessage),
 }
 
@@ -862,4 +971,72 @@ fn toast_action(message: impl Into<String>, toast_type: ratatui_toaster::ToastTy
         toast_type,
         position: TopRight,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Action, ExternalEditorTarget, editor_result_action, should_ignore_action_in_editor,
+    };
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn editor_mode_only_suppresses_tick_and_terminal_events() {
+        assert!(should_ignore_action_in_editor(&Action::Tick));
+        assert!(should_ignore_action_in_editor(&Action::AppEvent(
+            Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),)
+        )));
+        assert!(!should_ignore_action_in_editor(&Action::ForceRender));
+        assert!(!should_ignore_action_in_editor(
+            &Action::IssueBodyEditFinished {
+                issue_number: 7,
+                result: Ok("body".to_string()),
+            }
+        ));
+    }
+
+    #[test]
+    fn issue_body_editor_result_targets_issue_body_action() {
+        let action = editor_result_action(
+            42,
+            ExternalEditorTarget::IssueBody,
+            Ok("updated body".to_string()),
+        );
+
+        match action {
+            Action::IssueBodyEditFinished {
+                issue_number,
+                result,
+            } => {
+                assert_eq!(issue_number, 42);
+                assert_eq!(result.expect("editor result should be ok"), "updated body");
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn comment_editor_result_targets_comment_action() {
+        let action = editor_result_action(
+            42,
+            ExternalEditorTarget::Comment { comment_id: 9 },
+            Err("cancelled".to_string()),
+        );
+
+        match action {
+            Action::IssueCommentEditFinished {
+                issue_number,
+                comment_id,
+                result,
+            } => {
+                assert_eq!(issue_number, 42);
+                assert_eq!(comment_id, 9);
+                assert_eq!(
+                    result.expect_err("editor result should be err"),
+                    "cancelled"
+                );
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
 }
