@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "gitv-tui"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "async-trait",
