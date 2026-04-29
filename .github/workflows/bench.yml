@@ -1,0 +1,45 @@
+bench:
+  if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.BENCHER_PROJECT != '' }}
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - uses: bencherdev/bencher@v0
+    - run: |
+        bencher run \
+          --project ${{ vars.BENCHER_PROJECT }} \
+          --token ${{ secrets.BENCHER_API_TOKEN }} \
+          --branch main \
+          --adapter rust_criterion \
+          "cargo bench --all-features"
+
+bench-pr:
+  if: ${{ github.event_name == 'pull_request' && vars.BENCHER_PROJECT != '' }}
+  runs-on: ubuntu-latest
+  permissions:
+    pull-requests: write
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - uses: bencherdev/bencher@v0
+    - run: |
+        bencher run \
+          --project ${{ vars.BENCHER_PROJECT }} \
+          --token ${{ secrets.BENCHER_API_TOKEN }} \
+          --branch ${{ github.head_ref }} \
+          --start-point main \
+          --start-point-reset \
+          --adapter rust_criterion \
+          --error-on-alert \
+          --github-actions ${{ secrets.GITHUB_TOKEN }} \
+          "cargo bench --all-features"
