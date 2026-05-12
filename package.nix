@@ -3,12 +3,16 @@
   rustPlatform,
 }:
 rustPlatform.buildRustPackage (finalAttrs: {
-  name = "gitv";
+  pname = "gitv";
+  version = "dev";
 
   src = ./.;
-  cargoLock = {
-    lockFile = ./Cargo.lock;
-    allowBuiltinFetchGit = true;
+
+  cargoLock.lockFile = ./Cargo.lock;
+
+  env = {
+    VERGEN_GIT_DESCRIBE = finalAttrs.version;
+    VERGEN_BUILD_DATE = "unknown";
   };
 
   meta = {
