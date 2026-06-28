@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/JayanAXHF/gitv/compare/hyperrat-v0.1.2...hyperrat-v0.1.3) - 2026-06-28
+
+### <!-- 1 -->Bug Fixes
+
+- fix dev artifact in prod
+
 ## [0.1.2](https://github.com/JayanAXHF/gitv/compare/hyperrat-v0.1.1...hyperrat-v0.1.2) - 2026-06-28
 
 ### <!-- 10 -->Other
