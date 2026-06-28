@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use ratatui_core::{
-    buffer::Buffer,
+    buffer::{Buffer, CellDiffOption},
     layout::{Position, Rect},
     style::{Modifier, Style},
     widgets::Widget,
@@ -129,14 +129,14 @@ impl Widget for Link<'_> {
             if let Some(first_cell) = buf.cell_mut(Position::new(area.x, area.y)) {
                 first_cell.set_symbol(&encoded);
                 first_cell.set_style(style);
-                first_cell.set_skip(false);
+                first_cell.set_diff_option(CellDiffOption::None);
             }
 
             for offset in 1..label_width {
                 let x = area.x + offset as u16;
                 if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
-                    cell.set_symbol(" ");
-                    cell.set_skip(true);
+                    cell.set_symbol("s");
+                    cell.set_diff_option(CellDiffOption::Skip);
                     cell.set_style(style);
                 }
             }
@@ -147,7 +147,8 @@ impl Widget for Link<'_> {
         for offset in 0..label_width {
             let x = area.x + offset as u16;
             if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
-                cell.set_skip(false);
+                cell.set_diff_option(CellDiffOption::None);
+                cell.set_style(style);
             }
         }
     }
@@ -158,7 +159,7 @@ fn clear_area_row(area: Rect, buf: &mut Buffer) {
         let x = area.x + offset;
         if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
             cell.set_symbol(" ");
-            cell.set_skip(false);
+            cell.set_diff_option(CellDiffOption::None);
         }
     }
 }
@@ -238,7 +239,7 @@ mod tests {
 
         for x in 1..7 {
             let cell = buf.cell(Position::new(x, 0)).expect("linked cell");
-            assert!(cell.skip);
+            assert!(cell.diff_option == CellDiffOption::Skip);
         }
     }
 
@@ -252,7 +253,7 @@ mod tests {
 
         for x in 1..4 {
             let cell = buf.cell(Position::new(x, 0)).expect("clipped cell");
-            assert!(cell.skip);
+            assert!(cell.diff_option == CellDiffOption::Skip);
             assert_eq!(cell.symbol(), " ");
         }
     }
@@ -266,7 +267,8 @@ mod tests {
 
         for x in 4..9 {
             let cell = buf.cell(Position::new(x, 0)).expect("tail cell");
-            assert!(!cell.skip);
+
+            assert!(cell.diff_option == CellDiffOption::Skip);
             assert_eq!(cell.symbol(), " ");
         }
     }
@@ -280,7 +282,7 @@ mod tests {
 
         assert_eq!(buf.cell(Position::new(0, 0)).expect("cell").symbol(), "r");
         assert_eq!(buf.cell(Position::new(1, 0)).expect("cell").symbol(), "a");
-        assert!(!buf.cell(Position::new(1, 0)).expect("cell").skip);
+        assert!(buf.cell(Position::new(1, 0)).expect("cell").diff_option != CellDiffOption::Skip);
     }
 
     #[test]
