@@ -1,6 +1,6 @@
 [package]
 name = "gitv-tui"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 build = "build.rs"
 description = "A terminal-based GitHub client built with Rust and Ratatui."
@@ -29,7 +29,7 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 directories = "6.0.0"
 edit = "0.1.5"
 futures = "0.3.32"
-hyperrat = { path = "crates/hyperrat", version = "0.1.1" }
+hyperrat = { path = "crates/hyperrat", version = "0.1.2" }
 inquire = "0.9.4"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
 octocrab = "0.49.7"
@@ -39,7 +39,7 @@ rat-cursor = "2.0.0"
 rat-widget = "3.2.1"
 ratatui = {version = "0.30.0", features = ["unstable-widget-ref"] }
 ratatui-macros = "0.7.0"
-ratatui-toaster = { path = "crates/ratatui-toaster", version = "0.1.3", features = ["tokio"] }
+ratatui-toaster = { path = "crates/ratatui-toaster", version = "0.1.4", features = ["tokio"] }
 termprofile = { version = "0.2.3", features = ["convert", "ratatui"] }
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
 thiserror = "2.0.18"
