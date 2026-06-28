@@ -12,5 +12,5 @@ keywords = ["tui", "cli", "ratatui"]
 categories = ["command-line-utilities", "command-line-interface"]
 
 [dependencies]
-ratatui-core = "0.1.0"
+ratatui-core = "0.1.2"
 textwrap = "0.16.2"
