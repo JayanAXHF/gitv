@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.4...gitv-tui-v0.4.5) - 2026-06-28
+
+### <!-- 7 -->Miscellaneous Tasks
+
+- updated the following local packages: hyperrat
+
 ## [0.4.4](https://github.com/JayanAXHF/gitv/compare/gitv-tui-v0.4.3...gitv-tui-v0.4.4) - 2026-06-28
 
 ### <!-- 1 -->Bug Fixes
