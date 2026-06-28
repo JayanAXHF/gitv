@@ -135,7 +135,7 @@ impl Widget for Link<'_> {
             for offset in 1..label_width {
                 let x = area.x + offset as u16;
                 if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
-                    cell.set_symbol("s");
+                    cell.set_symbol(" ");
                     cell.set_diff_option(CellDiffOption::Skip);
                     cell.set_style(style);
                 }
